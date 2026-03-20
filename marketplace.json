@@ -1,0 +1,14 @@
+{
+  "name": "wan-huiyan-causal-impact-campaign",
+  "owner": {
+    "name": "Huiyan Wan"
+  },
+  "plugins": [
+    {
+      "name": "causal-impact-campaign",
+      "source": ".",
+      "description": "Causal impact measurement for marketing campaigns using Bayesian structural time series.",
+      "version": "1.0.0"
+    }
+  ]
+}
