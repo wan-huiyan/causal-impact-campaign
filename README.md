@@ -78,12 +78,53 @@ This skill constructs a Bayesian counterfactual ("what would have happened witho
 | 6. Interpret | Client-ready narrative with honest uncertainty communication |
 | 7. Deliver | HTML slide deck + scrolling report for internal or client delivery |
 
+## The Journey: p=0.223 to p=0.039
+
+Starting from the same 4 days of campaign data, systematic modelling improvements achieved statistical significance:
+
+| Step | p-value | Key insight |
+|---|---|---|
+| Original spec | 0.223 | Solid foundation — correct direction |
+| Exclude high-variance period from pre-period | 0.163 | -27% CI width. Seasonal variance was the dominant noise |
+| Multi-modal holiday intensity (v2) | 0.140 | 6-component curve (r=0.828) beats single Gaussian (r=0.632) |
+| Remove contaminated covariate | ~0.06 | Biggest single improvement — was absorbing the effect |
+| Add weather + clean spec | **0.039** | **Significant at p<0.05. 96% probability.** |
+
+**The meta-lesson:** The path to significance was dominated by **removing** things, not adding them.
+
+## Key Techniques Explored
+
+### What worked
+
+| Technique | Impact | How |
+|---|---|---|
+| **Combined covariate safety audit** | Removed significant bias | Checks both correlation AND intervention safety → INCLUDE/CAUTION/SKIP |
+| **Multi-modal holiday intensity (v2)** | r: -0.024→0.828 | 6-component curve: main peak, secondary peak, ramp, shoulder, baseline, post-event |
+| **Pre-period exclusion of high-variance events** | -27% CI width | Start after seasonal peaks to avoid variance inflation |
+| **RDiT (Regression Discontinuity in Time)** | Achieved significance | Local boundary comparison — best method for interventions <7 days |
+| **Conformal prediction intervals** | 61% tighter CIs | Distribution-free intervals from pre-period residual quantiles |
+| **Effect decomposition** | Identified primary lever | Separate CausalImpact on sub-metrics reveals which lever moved |
+| **Post-intervention persistence** | 66% effect persisted | Full-period analysis showed effect continued weeks post-intervention |
+| **Weather covariates** | -3.2% CI width | Open-Meteo API — exogenous, always safe |
+
+### What didn't work (and why)
+
+| Technique | Hypothesis | Result | Lesson |
+|---|---|---|---|
+| Fourier annual seasonality (k=1..4) | Capture yearly patterns | +0.9% CI (worse) | Needs 2+ annual cycles; insufficient data |
+| sin/cos day-of-week encoding | Capture full weekly cycle | Redundant with nseasons=7 | tfcausalimpact already models DoW internally |
+| CausalPy WeightedSumFitter | SC-style weighted combination | sigma doubled | Wrong model class for single-unit ITS |
+| Holiday intensity v3 (improved post-event) | Better post-peak fit | r dropped 0.828→0.795 | Post-peak is tiny fraction of data |
+| Paid share ratio covariate | Media intensity signal | r=0.14, no improvement | Low correlation, added noise |
+
 ## Key Lessons Encoded
 
 - **Subtract before you add** — removing contaminated covariates and high-variance pre-periods beats adding more features
 - **Contaminated covariates silently absorb causal effects** — always run a safety audit (correlation + intervention change)
-- **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks (6-component curve: r=0.791 vs r=-0.024 for binary)
-- **RDiT beats BSTS for short campaigns** — local boundary comparison achieves significance where global BSTS can't
+- **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks
+- **RDiT beats BSTS for short interventions** — local boundary comparison achieves significance where global BSTS can't
+- **Conformal CIs are 61% tighter than Bayesian** — distribution-free uncertainty as a sanity check
+- **nseasons=7 makes explicit DoW covariates redundant** — sin/cos added noise, not signal
 - **Two methods > one** — cross-method agreement provides stronger evidence than any single p-value
 - **Honest uncertainty builds client trust** — never claim statistical significance you don't have
 
