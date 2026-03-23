@@ -92,6 +92,21 @@ Starting from the same 4 days of campaign data, systematic modelling improvement
 
 **The meta-lesson:** The path to significance was dominated by **removing** things, not adding them.
 
+## What This Catches
+
+### Strategic traps (these save weeks)
+
+- **Contaminated covariates silently absorb causal effects.** A covariate correlated with both the outcome *and* the intervention timing absorbs the effect you're trying to measure — making a real p<0.05 result look like p=0.187. The skill runs a safety audit (correlation + intervention change) and flags INCLUDE/CAUTION/SKIP per covariate.
+- **Before/after isn't causation.** Without a counterfactual, "accidents dropped 15%" could be weather, seasonality, or regression to the mean. The skill constructs a Bayesian synthetic control and measures the gap with proper uncertainty.
+- **Single-method fragility.** One p-value from one method doesn't convince stakeholders (or reviewers). The skill runs two independent methods (BSTS + RDiT) — agreement between them is stronger evidence than any single result.
+- **Overclaiming kills credibility.** Presenting a marginal result as definitive, or a short campaign as conclusive, damages trust. The skill estimates minimum detectable effect upfront and uses calibrated language ("likely" not "definitely" for 90-95% probability).
+
+### Methodological traps (these save hours)
+
+- **High-variance pre-periods inflate confidence intervals.** Seasonal peaks in the pre-period add noise the model can't explain. Excluding them tightened CIs by 27%.
+- **Wrong model class for the study design.** WeightedSumFitter (synthetic control) doubled sigma on single-unit ITS data. The skill selects the right CausalPy model class for your design.
+- **Overfitting with unnecessary features.** Fourier terms need 2+ annual cycles; sin/cos DoW is redundant with nseasons=7. More features ≠ better counterfactual.
+
 ## Key Techniques Explored
 
 ### What worked
@@ -99,8 +114,8 @@ Starting from the same 4 days of campaign data, systematic modelling improvement
 | Technique | Impact | How |
 |---|---|---|
 | **Combined covariate safety audit** | Removed significant bias | Checks both correlation AND intervention safety → INCLUDE/CAUTION/SKIP |
-| **Multi-modal holiday intensity (v2)** | r: -0.024→0.828 | 6-component curve: main peak, secondary peak, ramp, shoulder, baseline, post-event |
 | **Pre-period exclusion of high-variance events** | -27% CI width | Start after seasonal peaks to avoid variance inflation |
+| **Multi-modal holiday intensity (v2)** | r: -0.024→0.828 | 6-component curve: main peak, secondary peak, ramp, shoulder, baseline, post-event |
 | **RDiT (Regression Discontinuity in Time)** | Achieved significance | Local boundary comparison — best method for interventions <7 days |
 | **Conformal prediction intervals** | 61% tighter CIs | Distribution-free intervals from pre-period residual quantiles |
 | **Effect decomposition** | Identified primary lever | Separate CausalImpact on sub-metrics reveals which lever moved |
@@ -119,14 +134,17 @@ Starting from the same 4 days of campaign data, systematic modelling improvement
 
 ## Key Lessons Encoded
 
+**Strategic** (apply to any causal analysis):
 - **Subtract before you add** — removing contaminated covariates and high-variance pre-periods beats adding more features
 - **Contaminated covariates silently absorb causal effects** — always run a safety audit (correlation + intervention change)
+- **Two methods > one** — cross-method agreement provides stronger evidence than any single p-value
+- **Honest uncertainty builds client trust** — never claim statistical significance you don't have
+
+**Tactical** (specific techniques):
 - **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks
 - **RDiT beats BSTS for short interventions** — local boundary comparison achieves significance where global BSTS can't
 - **Conformal CIs are 61% tighter than Bayesian** — distribution-free uncertainty as a sanity check
 - **nseasons=7 makes explicit DoW covariates redundant** — sin/cos added noise, not signal
-- **Two methods > one** — cross-method agreement provides stronger evidence than any single p-value
-- **Honest uncertainty builds client trust** — never claim statistical significance you don't have
 
 ## Limitations
 
