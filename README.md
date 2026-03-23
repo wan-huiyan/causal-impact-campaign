@@ -1,6 +1,6 @@
 # Causal Impact Campaign
 
-A [Claude Code](https://claude.com/claude-code) skill that measures the causal impact of an intervention on a time series metric using Bayesian structural time series — with dual-method validation and client-ready deliverables.
+A [Claude Code](https://claude.com/claude-code) skill that measures the causal impact of an intervention on a time series metric using Bayesian structural time series — with dual-method validation, interactive HTML explorers, and client-ready deliverables.
 
 ![Demo output — causal impact analysis summary](docs/demo-output.png)
 *Example output: policy impact summary with dual-method agreement, key modelling decisions, and validation checks.*
@@ -76,7 +76,7 @@ This skill constructs a Bayesian counterfactual ("what would have happened witho
 | 4. Dual Analysis | Run both tfcausalimpact (BSTS) and CausalPy (RDiT/ITS) for robustness |
 | 5. Validate | Rolling backtests, placebo tests, sensitivity analysis, automated scorecard |
 | 6. Interpret | Client-ready narrative with honest uncertainty communication |
-| 7. Deliver | HTML slide deck + scrolling report for internal or client delivery |
+| 7. Deliver | Interactive HTML explorer + slide deck + scrolling report |
 
 ## The Journey: p=0.223 to p=0.039
 
@@ -106,6 +106,21 @@ Every causal analysis follows the same pattern: a promising-but-not-significant 
 - **High-variance pre-periods inflate confidence intervals.** Seasonal peaks in the pre-period add noise the model can't explain. Excluding them tightened CIs by 27%.
 - **Wrong model class for the study design.** WeightedSumFitter (synthetic control) doubled sigma on single-unit ITS data. The skill selects the right CausalPy model class for your design.
 - **Overfitting with unnecessary features.** Fourier terms need 2+ annual cycles; sin/cos DoW is redundant with nseasons=7. More features ≠ better counterfactual.
+
+## Interactive Explorer
+
+The skill generates a **single self-contained HTML file** the client opens in their browser — no server, no install, works offline. Built with Plotly.js and embedded pre-computed data.
+
+**What the client can do:**
+- **Switch model specifications** — dropdown selector updates all metrics live (headline £, p-value, CI, confidence badge)
+- **Explore the counterfactual chart** — zoom, pan, hover for daily values on the observed vs predicted revenue timeline
+- **Compare methods** — click between BSTS, RDiT, CausalPy, and Conformal to see effect estimates with CI error bars
+- **Drill into the mechanism** — decomposition cards show Conversion Rate (+14%), Transactions (+19%), AOV (+0.7%)
+- **Check persistence** — tabbed view of during-promo vs after-promo daily effects, plus paid vs organic channel split
+
+The client explores robustness themselves rather than trusting a static summary. When they toggle between 8 model specifications and see the uplift stay positive across all of them, that's more convincing than any single p-value.
+
+![Interactive explorer — model specification selector with live-updating metrics and Plotly.js counterfactual chart](docs/demo-interactive.png)
 
 ## Key Techniques Explored
 
@@ -230,6 +245,7 @@ Built from real causal inference methodology applied to public policy analysis. 
 
 | Version | Changes |
 |---------|---------|
+| 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |
 | 1.1.0 | CausalPy model selection guide (5 classes), quadratic time trend, internal notebook |
 | 1.0.0 | Initial release: dual-method analysis, RDiT, conformal CIs, power analysis, HTML deliverables |
 
