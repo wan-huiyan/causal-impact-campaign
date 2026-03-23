@@ -80,7 +80,7 @@ This skill constructs a Bayesian counterfactual ("what would have happened witho
 
 ## The Journey: p~0.22 to p<0.05
 
-Starting from the same 4 days of campaign data, systematic modelling improvements achieved statistical significance:
+Every causal analysis follows the same pattern: a promising-but-not-significant first result, then systematic improvements that either find the real signal or confirm there isn't one. Here's what that looks like:
 
 | Step | p-value | Key insight |
 |---|---|---|
