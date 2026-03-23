@@ -9,6 +9,7 @@
 6. [Sensitivity Analysis](#6-sensitivity-analysis)
 7. [Scorecard](#7-scorecard)
 8. [Findings Document Template](#8-findings-template)
+9. [Interactive HTML Explorer](#9-interactive-html-explorer)
 
 ---
 
@@ -313,3 +314,179 @@ See the SKILL.md Step 7 for the document structure. The findings markdown should
 - Recommendations
 - File reference
 - Technical notes (deps, auth, config)
+
+---
+
+## 9. Interactive HTML Explorer
+
+### Export counterfactual data for embedding
+
+```python
+# After running CausalImpact — export daily predictions for the interactive chart
+inf = ci.inferences
+export_df = pd.DataFrame({
+    'date': inf.index.strftime('%Y-%m-%d'),
+    'observed': inf['response'].round(0).astype(int),
+    'predicted': inf['preds'].round(0).astype(int),
+    'ci_lower': inf['preds_lower'].round(0).astype(int),
+    'ci_upper': inf['preds_upper'].round(0).astype(int)
+})
+# Filter to ~2 weeks before intervention through end of post-period
+mask = (export_df['date'] >= PRE_CHART_START) & (export_df['date'] <= POST_END)
+export_df[mask].to_csv('counterfactual_data.csv', index=False)
+
+# Convert to JSON for embedding in HTML
+import json
+chart_data = {
+    'dates': export_df[mask]['date'].tolist(),
+    'observed': export_df[mask]['observed'].tolist(),
+    'predicted': export_df[mask]['predicted'].tolist(),
+    'ciUpper': export_df[mask]['ci_upper'].tolist(),
+    'ciLower': export_df[mask]['ci_lower'].tolist()
+}
+print(json.dumps(chart_data, indent=2))
+```
+
+### Build the spec data object
+
+```python
+# After running all sensitivity specs — build JSON for the spec selector
+import json
+
+spec_data = {}
+for name, result in sensitivity_results.items():
+    s = result['ci'].summary_data
+    spec_data[name] = {
+        'name': result['label'],
+        'effect': int(s.loc['abs_effect', 'cumulative']),
+        'daily': int(s.loc['abs_effect', 'average']),
+        'relative': round(s.loc['rel_effect', 'average'] * 100, 1),
+        'pval': round(result['ci'].p_value, 3),
+        'probPos': round((1 - result['ci'].p_value) * 100, 1),
+        'ciLow': int(s.loc['abs_effect_lower', 'cumulative']),
+        'ciHigh': int(s.loc['abs_effect_upper', 'cumulative']),
+        'sig': result['ci'].p_value < 0.05,
+        'sigLabel': f"p = {result['ci'].p_value:.3f}",
+        'preStart': result.get('pre_start', 'Oct 2024'),
+        'note': result.get('note', '')
+    }
+
+print(json.dumps(spec_data, indent=2))
+```
+
+### Interactive HTML structure
+
+The interactive explorer is a single self-contained HTML file with 5 sections:
+
+```
+client_interactive.html
+├── <head>
+│   ├── Google Fonts (Fraunces + DM Sans) — CDN
+│   ├── Plotly.js v2.35+ — CDN
+│   └── <style> — CSS design system (reuse from static report)
+├── <body>
+│   ├── Hero (headline metrics + spec dropdown selector)
+│   ├── Section 1: Counterfactual chart (Plotly div, zoom/hover/pan)
+│   ├── Section 2: Method comparison (4 clickable cards + horizontal bar chart with CI error bars)
+│   ├── Section 3: Effect decomposition (CR/Txns/Rev/AOV cards with animated probability bars)
+│   ├── Section 4: Channel & Persistence (tabbed: persistence bars + channel bars)
+│   ├── Section 5: Validation scorecard (table with pass/borderline/fail)
+│   └── Footer
+└── <script>
+    ├── const DATA = { specs: {...}, methods: {...}, timeseries: {...} }
+    ├── updateSpec() — triggered by dropdown change, updates all metrics
+    ├── renderCounterfactualChart() — Plotly time series with CI band
+    ├── selectMethod(key) — highlights card, updates bar chart
+    ├── renderMethodChart() — horizontal bars with error bars + zero line
+    ├── renderPersistenceChart() — bar chart: during vs after promo
+    ├── renderChannelChart() — bar chart: paid vs organic uplift
+    ├── switchTab(tab) — toggles persistence/channel views
+    └── IntersectionObserver — scroll-triggered fade-in animations
+```
+
+**Key Plotly.js patterns:**
+
+```javascript
+// Counterfactual chart with CI band
+const traces = [
+  // CI band (filled area)
+  {
+    x: dates.concat([...dates].reverse()),
+    y: ciUpper.concat([...ciLower].reverse()),
+    fill: 'toself',
+    fillcolor: 'rgba(26, 95, 122, 0.08)',
+    line: { color: 'transparent' },
+    name: '95% CI',
+    hoverinfo: 'skip'
+  },
+  // Predicted (dashed)
+  {
+    x: dates, y: predicted,
+    mode: 'lines',
+    line: { color: '#1a5f7a', width: 2, dash: 'dash' },
+    name: 'Counterfactual',
+    hovertemplate: '%{x}<br>Predicted: £%{y:,.0f}<extra></extra>'
+  },
+  // Observed (solid)
+  {
+    x: dates, y: observed,
+    mode: 'lines+markers',
+    line: { color: '#0a1628', width: 2.5 },
+    name: 'Observed',
+    hovertemplate: '%{x}<br>Observed: £%{y:,.0f}<extra></extra>'
+  }
+];
+
+// Method comparison (horizontal bar with error bars)
+const methodTrace = {
+  x: effectValues,
+  y: methodNames,
+  type: 'bar',
+  orientation: 'h',
+  marker: { color: colors },
+  error_x: {
+    type: 'data',
+    symmetric: false,
+    array: errorHigh,   // ciHigh - effect
+    arrayminus: errorLow // effect - ciLow
+  }
+};
+// Add zero-effect line as a shape
+```
+
+**Spec selector pattern:**
+
+```javascript
+// Dropdown triggers metric updates with fade animation
+document.getElementById('specSelect').addEventListener('change', () => {
+  const spec = DATA.specs[this.value];
+  document.getElementById('heroUplift').innerHTML = '£' + Math.round(spec.effect / 1000) + 'K';
+  document.getElementById('metricRelative').textContent = '+' + spec.relative + '%';
+  // ... update all metric cards
+  // Animate
+  document.querySelectorAll('.metric-card .value').forEach(el => {
+    el.style.opacity = '0.3';
+    setTimeout(() => el.style.opacity = '1', 50);
+  });
+});
+```
+
+**Design system (CSS variables to reuse from static report):**
+
+```css
+:root {
+  --ink: #0a1628;          /* dark navy */
+  --ink-light: #3a4a6b;
+  --ink-muted: #7a8ba8;
+  --surface: #f6f4f0;      /* warm beige background */
+  --paper: #fdfcfa;        /* card background */
+  --accent: #1a5f7a;       /* teal */
+  --accent-deep: #0e3d52;
+  --highlight: #d4a853;    /* gold */
+  --positive: #2d8a6e;     /* green (pass) */
+  --caution: #c27a3a;      /* orange (borderline) */
+  --negative: #b54a4a;     /* red (fail) */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'DM Sans', -apple-system, sans-serif;
+}
+```
