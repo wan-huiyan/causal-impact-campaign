@@ -1,33 +1,33 @@
 ---
 name: causal-impact-campaign
 description: |
-  Measure the causal impact of a campaign, policy change, or intervention on a target metric
-  (revenue, accidents, conversions, transactions) using Bayesian structural time series. Use this
-  skill whenever the user mentions "causal impact", "campaign uplift", "policy effect",
-  "incrementality", "did the intervention work", "metric lift from campaign", or wants to attribute
-  a metric change to a specific intervention using time series data. Also trigger when working with
-  time series data and the user asks about measuring the effect of a policy change, campaign, ad
-  spend shift, or any time-bounded action. This skill covers the full pipeline: data exploration,
-  covariate engineering, dual-method analysis (tfcausalimpact + CausalPy), validation,
-  interpretation, and deliverables. Even if the user only mentions one method, use this skill to
-  ensure robustness through cross-method comparison.
+  Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
+  (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
+  the user mentions "causal impact", "campaign uplift", "promo effect", "incrementality", "did the
+  campaign work", "revenue lift from campaign", or wants to attribute a metric change to a specific
+  intervention using time series data. Also trigger when working with GA4/BigQuery data and the user
+  asks about measuring the effect of a price change, delivery promo, ad campaign, or any time-bounded
+  business action. This skill covers the full pipeline: data exploration, covariate engineering,
+  dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing
+  deliverables including interactive HTML explorers with Plotly.js. Even if the user only mentions
+  one method, use this skill to ensure robustness through cross-method comparison.
 ---
 
 # Causal Impact Campaign Analysis
 
-This skill guides you through measuring the causal effect of a campaign, policy change, or
+This skill guides you through measuring the causal effect of a marketing campaign or business
 intervention on a target metric using Bayesian structural time series methods. It encodes
-hard-won lessons from real analyses — particularly around short-lived interventions,
-seasonal distortions, and honest statistical communication.
+hard-won lessons from real client engagements — particularly around short-lived campaigns,
+retail seasonality, and honest statistical communication.
 
 The approach runs two independent Bayesian methods (tfcausalimpact and CausalPy) for robustness,
 includes a rigorous validation suite, and produces a client-ready findings document.
 
 ## When This Applies
 
-- Measuring metric uplift/reduction from a campaign, policy change, or intervention
+- Measuring revenue/conversion uplift from a campaign, promo, or intervention
 - The user has time series data (typically daily) with a clear intervention date
-- Data comes from BigQuery, a database, CSV, or similar structured source
+- Data comes from GA4, BigQuery, or similar web analytics
 - There is NO randomised control group (if there is, use A/B testing instead)
 - The intervention is time-bounded (has a start date, and optionally an end date)
 
@@ -46,16 +46,16 @@ Before touching data, establish these facts:
 
 | Question | Why It Matters |
 |---|---|
-| What was the intervention? | Determines which metrics to target and which covariates are safe |
+| What was the campaign? | Determines which metrics to target and which covariates are safe |
 | When did it start and end? | Defines analysis windows |
-| What was the scope? | Determines which covariates are safe as controls |
-| Were other interventions running? | Concurrent interventions confound the analysis |
-| Was it region-wide or targeted? | Targeting enables stronger designs (synthetic control, geo lift) |
-| How long was it? | Interventions < 1 week are very hard to detect statistically |
+| What channels did it run on? | Determines if paid_sessions is safe as a control |
+| Were other campaigns running? | Concurrent interventions confound the analysis |
+| Was it site-wide or geo-targeted? | Geo-targeting enables stronger designs (synthetic control, geo lift) |
+| How long was it? | Campaigns < 1 week are very hard to detect statistically |
 
 **Critical early assessment — signal-to-noise ratio:**
 ```
-SNR = expected_daily_effect / daily_metric_std_dev
+SNR = expected_daily_effect / daily_revenue_std_dev
 ```
 - SNR > 0.5: Good chance of statistical significance
 - SNR 0.2–0.5: Possible but will need strong covariates
@@ -81,23 +81,23 @@ print(f"Date range: {df['date'].min()} to {df['date'].max()}")
 
 ### Key explorations before modelling
 
-1. **Metric by day of week** — is there a strong weekly cycle?
-2. **Component splits** — can you decompose the metric into meaningful sub-components?
-3. **Holiday/seasonal patterns** — how extreme are seasonal spikes or troughs?
-4. **Around the intervention** — what changed? Which sub-metrics moved?
+1. **Revenue by day of week** — is there a strong weekly cycle?
+2. **Paid vs organic split** — what share of sessions/revenue is paid?
+3. **Holiday/seasonal patterns** — how extreme are BF/Christmas spikes?
+4. **Around the intervention** — what changed? Traffic? Conversion? AOV?
 5. **Correlation matrix** — which covariates correlate with the target?
 
-### The "what changed" diagnostic
+### The "traffic vs conversion" diagnostic
 
 This is critical for covariate safety. Compare the intervention period to the week before:
 
 ```python
-# If covariates barely changed but the target metric shifted → intervention drove the change
-# This means those covariates are SAFE controls
-post = df[(df['date'] >= INTERVENTION_START) & (df['date'] <= INTERVENTION_END)]
+# If sessions barely changed but revenue jumped → promo lifted conversion/AOV
+# This means sessions-based covariates are SAFE controls
+promo = df[(df['date'] >= INTERVENTION_START) & (df['date'] <= INTERVENTION_END)]
 pre_week = df[(df['date'] >= INTERVENTION_START - pd.Timedelta(days=7)) & (df['date'] < INTERVENTION_START)]
-print(f"Pre-week: target={pre_week[TARGET].mean():.1f}, covariate={pre_week[COVARIATE].mean():.1f}")
-print(f"Post:     target={post[TARGET].mean():.1f}, covariate={post[COVARIATE].mean():.1f}")
+print(f"Pre-week: revenue={pre_week['revenue'].mean():.0f}, sessions={pre_week['sessions'].mean():.0f}")
+print(f"Promo:    revenue={promo['revenue'].mean():.0f}, sessions={promo['sessions'].mean():.0f}")
 ```
 
 ## Step 3: Engineer Covariates
@@ -107,29 +107,28 @@ This is where most of the analytical value is added. Better covariates = tighter
 
 ### The Covariate Safety Rule
 
-**A covariate must NOT be affected by the intervention.** If the policy change also triggered
-road construction changes, `construction_zones` absorbs the effect and your estimate will be biased toward zero.
+**A covariate must NOT be affected by the intervention.** If the campaign drove paid traffic,
+`paid_sessions` absorbs the effect and your estimate will be biased toward zero.
 
-Safe controls for most intervention types:
-- Exogenous variables — weather, daylight hours, calendar effects
-- Calendar variables — day-of-week, holidays, school terms
-- Unaffected infrastructure metrics (if available)
+Safe controls for most campaign types:
+- `organic_sessions` — organic demand is rarely affected by a delivery/price promo
+- Calendar variables — day-of-week, holidays, payday cycles
+- Weather (if available)
 
 > **Always test with and without suspect covariates.** If removing a covariate increases the
-> effect estimate substantially (>20%), it's likely absorbing the causal signal. In the example
-> public safety case, removing `construction_zones` increased the effect by 8 accidents/day (+36%)
-> and improved p-value from 0.142 to 0.060 — achieving BSTS significance for the first time.
+> effect estimate substantially (>20%), it's likely absorbing the causal signal. In the The Retailer
+> case, removing `paid_sessions` increased the effect by a meaningful amount (+36%) and improved p-value from
+> 0.142 to 0.060 — achieving BSTS significance for the first time.
 
 ### Covariate Engineering Recipes
 
 #### 1. Split aggregate metrics
-Don't use a single aggregate covariate when sub-components are available. For example, split
-`total_traffic_volume` into `residential_traffic` and `arterial_traffic`:
-- Both are more informative than the aggregate
-- Allows you to check if the intervention affected one sub-component but not the other
+Don't use `sessions` as a single covariate. Split into `paid_sessions` and `organic_sessions`:
+- Both are more informative than the aggregate (r=0.885 and r=0.864 vs r=0.903 combined)
+- Allows you to check if the intervention affected one channel but not the other
 
 #### 2. Cyclical day-of-week encoding
-Binary `is_weekend` misses that Sunday accident counts differ from Saturday, and Tuesday is the
+Binary `is_weekend` misses that Sunday revenue differs from Saturday, and Tuesday is the
 weakest day. Use sin/cos encoding to capture the full weekly cycle:
 
 ```python
@@ -142,47 +141,43 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 > redundant and can add noise. Only add DoW covariates when using CausalPy or other models
 > without built-in seasonality.
 
-#### 3. Seasonal intensity (not binary flags)
-This is one of the most important lessons. Binary flags like `school_holiday_flag` treat all
-holiday days equally, but half-term (elevated accidents due to children near roads) differs
-from summer holidays (reduced commuter traffic). The model sees unexplained residuals, which
-inflate variance estimates and widen ALL credible intervals — including for your intervention period.
+#### 3. Holiday intensity (not binary flags)
+This is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
+sale days equally, but Black Friday (a peak sale day) is 5x a regular sale day (a normal sale day). The model
+sees a massive unexplained residual, which inflates variance estimates and widens ALL
+credible intervals — including for your promo period.
 
-Use a continuous intensity curve that captures the shape of seasonal disruption:
+Use a continuous Gaussian bell curve peaking at Black Friday (~27 days before Christmas):
 
 ```python
-def school_holiday_intensity(date_series):
-    """Multi-modal school holiday intensity for traffic analysis. Components:
-    1. Half-term spikes (Feb, May, Oct)
-    2. Summer holiday plateau (Jul-Aug)
-    3. Christmas/New Year break
-    4. Easter break
-    5. Bank holiday weekends
-    6. End-of-term transition days
-    Correlation with accident count: r=0.791 (vs r=0.432 for single binary flag)
+def christmas_proximity(date_series):
+    """Multi-modal retail holiday intensity. Components:
+    1. Black Friday sharp spike (~27 days before Christmas)
+    2. BF weekend/Cyber Monday
+    3. Pre-BF ramp (~35 days before)
+    4. Gift shopping peak (~7 days before Christmas)
+    5. Mid-December elevated baseline
+    6. Boxing Day / winter sale
+    Correlation with revenue: r=0.828 (vs r=0.632 for single Gaussian)
     """
     result = pd.Series(0.0, index=date_series.index)
-    for idx in date_series.index:
-        d = date_series.loc[idx]
-        intensity = 0.0
-        # Summer holiday plateau (late Jul - Aug)
-        if d.month == 8 or (d.month == 7 and d.day >= 20):
-            intensity += 0.8
-        # Half-term spikes (approximate)
-        if d.month == 2 and 10 <= d.day <= 21: intensity += 0.6      # Feb half-term
-        if d.month == 5 and 24 <= d.day <= 31: intensity += 0.6      # May half-term
-        if d.month == 10 and 21 <= d.day <= 31: intensity += 0.6     # Oct half-term
-        # Christmas break
-        if d.month == 12 and d.day >= 20: intensity += 0.7
-        if d.month == 1 and d.day <= 6: intensity += 0.5
-        # Easter (approximate)
-        if d.month == 4 and 1 <= d.day <= 18: intensity += 0.5
-        result.loc[idx] = min(intensity, 1.0)
+    for year in date_series.dt.year.unique():
+        xmas = pd.Timestamp(f"{year}-12-25")
+        for idx in date_series.index:
+            d = (xmas - date_series.loc[idx]).days
+            intensity = 0.0
+            if 20 <= d <= 35: intensity += np.exp(-0.5 * ((d - 27) / 3) ** 2)       # BF spike
+            if 22 <= d <= 28: intensity += 0.6 * np.exp(-0.5 * ((d - 25) / 2) ** 2)  # BF weekend
+            if 28 <= d <= 42: intensity += 0.4 * np.exp(-0.5 * ((d - 33) / 5) ** 2)  # Pre-BF ramp
+            if 0 <= d <= 15: intensity += 0.7 * np.exp(-0.5 * ((d - 7) / 4) ** 2)    # Gift shopping
+            if 10 <= d <= 22: intensity += 0.3                                         # Mid-Dec baseline
+            if -10 <= d < 0: intensity += 0.3 * np.exp(-0.5 * ((d + 2) / 3) ** 2)    # Boxing Day
+            result.loc[idx] = max(result.loc[idx], min(intensity, 1.0))
     return result
 ```
 
-This variable typically achieves r=0.791 with accident counts for traffic analysis (vs r=0.432
-for a single binary flag and r~0.02 for a simple `is_holiday` indicator).
+This variable typically achieves r=0.828 with revenue for retail clients (vs r=0.632 for a
+single Gaussian and r≈0.02 for a binary `winter_sale_flag`).
 
 #### 4. Interaction terms
 Combine factors that amplify each other:
@@ -190,34 +185,34 @@ Combine factors that amplify each other:
 df['payday_x_weekend'] = df['payday_window_flag'] * df['is_weekend']
 ```
 
-#### 5. Derived ratio signals
+#### 5. Paid share as media intensity signal
 ```python
-df['rain_intensity'] = df['precipitation_mm'] / (df['precipitation_mm'].rolling(30).mean() + 0.01)
+df['paid_share'] = df['paid_sessions'] / (df['paid_sessions'] + df['organic_sessions'])
 ```
-Low standalone correlation (~0.14) but can be useful in combination. A ratio captures whether
-today's conditions are unusual relative to recent history.
+Low standalone correlation (~0.14) but can be useful in combination. A negative coefficient
+often means organic visitors convert better (higher revenue per organic session).
 
 ### Recommended covariate audit
 
 > **Combined audit:** Each covariate gets a single recommendation based on both its predictive
-> value (correlation with target metric) and its intervention safety (did it change during the intervention?).
+> value (correlation with revenue) and its intervention safety (did it change during the promo?).
 > `YES` = include. `CAUTION` = test with and without. `SKIP` = don't include.
 
 ```python
 # Combined covariate audit: checks BOTH correlation AND intervention safety
 pre_all = df[df['date'] < INTERVENTION_START]
 pre_week = df[(df['date'] >= INTERVENTION_START - pd.Timedelta(days=7)) & (df['date'] < INTERVENTION_START)]
-post = df[(df['date'] >= INTERVENTION_START) & (df['date'] <= INTERVENTION_END)]
+promo = df[(df['date'] >= INTERVENTION_START) & (df['date'] <= INTERVENTION_END)]
 
-CALENDAR_COVS = ['bank_holiday_flag', 'school_holiday_intensity', 'is_weekend',
-                 'weekend_x_rainfall']
-EXOGENOUS_COVS = ['temperature_avg', 'precipitation_mm', 'daylight_hours']
+CALENDAR_COVS = ['holiday_flag', 'payday_window_flag', 'kcp_period_flag',
+                 'winter_sale_flag', 'is_weekend', 'payday_x_weekend', 'xmas_intensity']
+EXOGENOUS_COVS = ['temp_avg', 'precipitation_mm']
 
 for col in COVARIATES:
     corr = pre_all[col].corr(pre_all[TARGET])
     pre_val = pre_week[col].mean()
-    post_val = post[col].mean()
-    change = (post_val / pre_val - 1) if pre_val != 0 else float('nan')
+    promo_val = promo[col].mean()
+    change = (promo_val / pre_val - 1) if pre_val != 0 else float('nan')
 
     if col in CALENDAR_COVS:
         safety = "SAFE (calendar)"
@@ -230,7 +225,7 @@ for col in COVARIATES:
 
     include = "YES" if corr > 0.05 and "SAFE" in safety else "CAUTION" if "INVESTIGATE" in safety else "SKIP"
 
-    print(f"{col:30s}  r={corr:+.3f}  post_change={change:+.1%}  {safety:25s}  → {include}")
+    print(f"{col:30s}  r={corr:+.3f}  promo_change={change:+.1%}  {safety:25s}  → {include}")
 ```
 
 Drop covariates that are constant in the pre-period, have >50% missing, or that receive
@@ -248,7 +243,7 @@ whether they agree is far more convincing than any single p-value.
 |---|---|---|---|
 | **BSTS (tfcausalimpact)** | Decomposes time series into trend + seasonality + regression, projects counterfactual | Always — the primary analysis. Full decomposition with covariates | Struggles with short campaigns (<7 days) — daily variance overwhelms signal |
 | **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine | No time series structure (no trend/seasonal components) |
-| **RDiT** | Local linear regression at the intervention boundary, bootstrap CIs | **Especially for short interventions.** Only method that achieved significance for short policy changes | Ignores data far from cutoff; sensitive to bandwidth; no decomposition |
+| **RDiT** | Local linear regression at the intervention boundary, bootstrap CIs | **Especially for short campaigns.** Only method that achieved significance for 4-day promo | Ignores data far from cutoff; sensitive to bandwidth; no decomposition |
 | **Conformal CIs** | Distribution-free prediction intervals from pre-period residual quantiles | Always — sanity check on Bayesian CIs. If 2x wider → model overconfident; if 2x narrower → model over-conservative | Can't compute probability of effect; sensitive to pre-period outliers |
 
 **Decision tree for short vs long campaigns:**
@@ -304,7 +299,7 @@ import causalpy as cp
 result = cp.InterruptedTimeSeries(
     df,
     treatment_time=INTERVENTION_START,
-    formula="accident_count ~ 1 + t + rainfall_mm + daylight_hours + sin_dow + cos_dow + school_holiday_intensity + temperature_avg + bank_holiday_flag",
+    formula="revenue ~ 1 + t + organic_sessions + paid_sessions + sin_dow + cos_dow + xmas_intensity + payday_window_flag + kcp_period_flag + holiday_flag",
     model=cp.pymc_models.LinearRegression(
         sample_kwargs={
             "random_seed": 42,
@@ -351,10 +346,10 @@ Run both methods with multiple covariate bundles to check robustness:
 ```python
 SENSITIVITY_SPECS = {
     "full_model": ALL_COVARIATES,
-    "weather_only": ["rainfall_mm", "daylight_hours"],
-    "weather_plus_calendar": ["rainfall_mm", "daylight_hours", "sin_dow", "cos_dow", "bank_holiday_flag"],
-    "weather_plus_school": ["rainfall_mm", "daylight_hours", "sin_dow", "cos_dow", "school_holiday_intensity"],
-    "weather_plus_construction": ["rainfall_mm", "daylight_hours", "construction_zones", "sin_dow", "cos_dow"],
+    "organic_only": ["organic_sessions"],
+    "organic_plus_calendar": ["organic_sessions", "sin_dow", "cos_dow", "payday_window_flag"],
+    "organic_plus_xmas": ["organic_sessions", "sin_dow", "cos_dow", "xmas_intensity"],
+    "paid_organic_split": ["organic_sessions", "paid_sessions", "sin_dow", "cos_dow"],
 }
 ```
 
@@ -369,7 +364,7 @@ Slide a fake intervention window across the pre-period. At each position, fit th
 everything before and predict the window. Compare predictions to actuals:
 
 ```python
-HORIZON = intervention_days  # same length as real intervention
+HORIZON = promo_days  # same length as real intervention
 STEP = 7              # slide by 1 week each time
 MAX_WINDOWS = 12      # cap to keep runtime manageable
 MIN_TRAIN = 56        # minimum pre-period for each backtest
@@ -406,9 +401,9 @@ Failing most = honest finding — report it as such.
 
 ### Watch for problematic backtest windows
 
-School holiday windows often show extreme WAPE (0% or 40%+) and massive placebo effects.
+Christmas/BF windows often show extreme WAPE (0% or 40%+) and massive placebo effects.
 These inflate the placebo distribution, making the real effect look less unusual. Note this
-in the findings — it's a feature of high-variance seasonal data, not a model failure.
+in the findings — it's a feature of high-variance retail data, not a model failure.
 
 ## Step 6: Interpret Honestly
 
@@ -416,36 +411,36 @@ in the findings — it's a feature of high-variance seasonal data, not a model f
 
 More data is NOT always better. Longer pre-periods can hurt if:
 - The website/tracking changed (structural break)
-- The covariate→metric relationship shifted (non-stationarity)
+- The sessions→revenue relationship shifted (non-stationarity)
 - COVID/post-COVID regime changes apply
-- The data provider can't supply accurate intervention flags further back
+- The client can't provide accurate campaign flags further back
 
-The binding constraint is often **intervention calendar completeness** — the team may not have
-reliable records of which policy changes occurred 2+ years ago. Flags like `school_holiday_flag`
-are only useful if accurate.
+The binding constraint is often **campaign calendar completeness** — the client may not have
+reliable records of which promotions ran 2+ years ago. Flags like `winter_sale_flag` are only
+useful if accurate.
 
 ### Framing for clients
 
 **When significant (p < 0.10):**
-> "The intervention produced an estimated X unit change in the target metric (95% CI: Y to Z),
-> with a W% probability this effect is genuine."
+> "The campaign generated an estimated £X in incremental revenue (95% CI: £Y to £Z),
+> with a Z% probability this effect is genuine."
 
 **When not significant but consistent:**
-> "Our best estimate is that the intervention produced approximately X unit change in the
-> target metric (+/−Y%). This finding is consistent across all model specifications and two
-> independent analytical methods. The probability the effect is genuine is approximately Z%.
-> Due to the short intervention duration (N days), the statistical confidence interval is wide —
-> we recommend longer intervention periods for more precise measurement."
+> "Our best estimate is that the campaign generated approximately £X in incremental revenue
+> (+Y%). This finding is consistent across all model specifications and two independent
+> analytical methods. The probability the effect is genuinely positive is approximately Z%.
+> Due to the short campaign duration (N days), the statistical confidence interval is wide —
+> we recommend running future campaigns for at least 2 weeks to enable more precise measurement."
 
 **Never claim** statistical significance when you don't have it. Credibility with clients
 comes from honesty, not from overselling.
 
 ### Recommendations to always include
 
-1. **Longer intervention periods** dramatically improve detectability (2+ weeks ideal)
-2. **Control regions** provide cleaner control groups for future measurement
-3. **Coordinate intervention calendars** to avoid overlapping policy changes
-4. **Double down on the lever identified** — if the speed limit reduced accidents, test other traffic calming measures
+1. **Longer campaigns** dramatically improve detectability (2+ weeks ideal)
+2. **Geo holdouts** provide cleaner control groups for future measurement
+3. **Coordinate campaign calendars** to avoid overlapping interventions
+4. **Double down on the lever identified** — if the promo lifted CR, test other conversion barrier removers
 
 ## Step 6b: Extension Analyses
 
@@ -453,43 +448,43 @@ After the primary analysis, run these extensions to deepen the insight:
 
 ### Effect Decomposition
 
-Run separate CausalImpact on `serious_accidents`, `minor_accidents`, and `pedestrian_incidents` as targets.
-This reveals **which lever the intervention pulled** — was it severity, frequency, or a specific road user group?
+Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
+**which lever the campaign pulled** — was it conversion, basket size, or traffic?
 
-In the example public safety case: serious accidents showed the strongest signal (−31%, p=0.041, 96% prob)
-while minor incidents barely moved (−4%). This told us the speed limit reduction primarily prevented
-high-severity collisions — lower speeds meant survivable impacts rather than fewer total incidents.
+In the The Retailer case: conversion rate showed the strongest signal (+14.3%, p=0.167, 83% prob positive)
+while AOV barely moved (+0.7%). This told us the delivery promo removed a conversion barrier — people
+already browsing decided to buy because delivery was free. They didn't spend more per order.
 
-This is often the most valuable insight for stakeholders — it informs future policy design.
+This is often the most valuable insight for the client — it informs future offer design.
 
-### Zone Split
+### Channel Split
 
-Run CausalImpact on `residential_accidents` and `arterial_accidents` separately to see if the
-intervention affected all road types or just targeted zones. Use `weather` covariates as controls
-for both (don't use `traffic_volume` as control for residential roads — endogeneity risk).
+Run CausalImpact on `paid_revenue` and `organic_revenue` separately to see if the campaign
+affected all channels or just one. Use `organic_sessions` as control for both (don't use
+`paid_sessions` as control for paid revenue — endogeneity risk).
 
-If both zones improve proportionally, it's a city-wide behavioural effect. If only residential
-zones improve, the policy is working as targeted.
+If both channels lift proportionally, it's a site-wide conversion effect. If only paid lifts,
+the campaign may be driving traffic rather than conversion.
 
-### Post-Intervention Persistence
+### Post-Promo Persistence
 
 Run CausalImpact with the full post-period (intervention start → data end) instead of just the
-intervention window. Compare average daily effect during intervention vs after:
+promo window. Compare average daily effect during promo vs after promo:
 
 ```
-persistence_ratio = post_intervention_avg_daily_effect / during_intervention_avg_daily_effect
+persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
 ```
 
 - Ratio > 50%: Significant persistence — report total impact including post-period
-- Ratio 10-50%: Partial persistence — mention as additional benefit
-- Ratio < 10%: Effect dissipated — report intervention-period only
+- Ratio 10-50%: Partial persistence — mention as additional upside
+- Ratio < 10%: Effect dissipated — report promo-period only
 
-In the example public safety case: 72% persistence over 2 weeks, suggesting driver behaviour adapted
-and the safety benefit persisted beyond the initial enforcement period.
+In the The Retailer case: 66% persistence over 2 weeks, making the total impact considerably larger than
+the headline promo-period figure.
 
 ### Weather Covariate
 
-For traffic safety and outdoor activity analyses, add daily temperature and precipitation as covariates.
+For retail/ecommerce clients, add daily temperature and precipitation as covariates.
 Source: [Open-Meteo API](https://open-meteo.com/) — free, no API key needed.
 
 ```python
@@ -503,13 +498,13 @@ resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params={
 })
 ```
 
-Weather typically has moderate correlation with accident counts (r ~ +0.15 to +0.30 for precipitation)
-and provides an orthogonal exogenous signal that can tighten credible intervals by 5-12%. Worth
-including when available, and often more impactful than in other domains.
+Weather typically has low standalone correlation with revenue (r ≈ -0.05 to +0.03) but provides
+an orthogonal exogenous signal that can tighten credible intervals by 2-5%. Worth including when
+available, but not transformative.
 
-**Why weather matters for traffic safety:** Rain/ice increases accident rates directly (reduced
-visibility, longer stopping distances). Temperature extremes affect road surface conditions.
-Daylight hours affect visibility — shorter days correlate with higher accident rates.
+**Why weather matters for retail:** Rain/cold drives online purchasing (people stay home). For
+footwear specifically, seasonal patterns (boots in autumn, sandals in spring) correlate with
+temperature.
 
 **SSL note:** Corporate proxies may block the Open-Meteo API. Use `curl -sk` to bypass, or
 `requests.get(..., verify=False)`.
@@ -586,12 +581,116 @@ A reproducible notebook with full code, diagnostics, and commentary. Separate au
 the client deliverables — include model diagnostics, correlation heatmaps, and validation
 details that would overwhelm a non-technical reader.
 
+### Interactive Explorer (recommended for client self-service)
+
+A single self-contained HTML file with Plotly.js charts and pre-computed scenario data embedded
+as JSON. The client opens it in their browser — no server, no install, works offline after first
+load. This is the **highest-impact deliverable** because it lets the client explore robustness
+themselves rather than trusting a static summary.
+
+**Architecture:** One HTML file containing:
+- CSS design system (reuse from slide deck/report)
+- Plotly.js loaded via CDN
+- All scenario data embedded as a `const DATA = {...}` JSON object in a `<script>` tag
+- JavaScript event handlers for dropdowns, tabs, and card clicks
+
+**5 interactive sections:**
+
+| Section | Interaction | What updates |
+|---|---|---|
+| Hero + Spec Selector | Dropdown to select model specification | Headline £, %, p-value, confidence badge, all metric cards |
+| Counterfactual Chart | Plotly.js zoom/hover/pan + CI band toggle | Interactive time series (observed vs predicted) |
+| Method Comparison | Clickable method cards | Horizontal bar chart with CI error bars, method description |
+| Effect Decomposition | Metric cards with animated probability bars | CR, Transactions, Revenue, AOV breakdown |
+| Channel & Persistence | Tabbed view (persistence / paid vs organic) | Bar charts + summary metrics per tab |
+
+Plus a **validation scorecard** table with pass/borderline/fail indicators.
+
+**Data to pre-compute and embed as JSON:**
+
+```javascript
+const DATA = {
+  specs: {
+    // One entry per model specification (typically 6-8)
+    best: {
+      name: "Recommended spec name",
+      effect: 150000,       // cumulative £
+      daily: 37500,         // daily avg £
+      relative: 22,         // relative % lift
+      pval: 0.04,
+      probPos: 96.1,
+      ciLow: -298000,
+      ciHigh: 762000,
+      sig: true,            // p < 0.05?
+      sigLabel: "p < 0.05",
+      preStart: "Jan 6 2025",
+      note: "Human-readable description of this spec"
+    },
+    // ... repeat for each sensitivity spec
+  },
+  methods: {
+    // One entry per analysis method
+    bsts:      { name: "...", effect: N, ciLow: N, ciHigh: N, desc: "...", metric: "...", pval: "..." },
+    rdit:      { ... },
+    causalpy:  { ... },
+    conformal: { ... }
+  },
+  timeseries: {
+    // Daily arrays for the counterfactual chart
+    dates: ["2026-02-13", ...],
+    observed: [210000, ...],
+    predicted: [208000, ...],
+    ciUpper: [340000, ...],
+    ciLower: [80000, ...]
+  }
+};
+```
+
+**Key implementation notes:**
+- **Data size:** Daily granularity × ~30 days around intervention × a few scenarios = tiny (<100KB JSON).
+  The Plotly.js CDN (~3.5MB) is the main dependency — cached after first load.
+- **Counterfactual data source options:**
+  1. **Best:** Extract `ci.inferences` from the tfcausalimpact run (observed, preds, preds_lower, preds_upper)
+     and save as CSV/JSON during the analysis step.
+  2. **Fallback:** Generate synthetic counterfactual = observed − (daily_effect estimate) for the promo period.
+     Less precise but sufficient for interactive exploration.
+- **Spec selector:** Updates all metrics simultaneously with a fade animation — gives the client an intuitive
+  sense of how stable the result is across specifications.
+- **Method comparison chart:** Horizontal bar chart with error bars. A red dashed zero-effect line makes it
+  visually obvious whether each method's CI excludes zero.
+- **Decomposition bars:** Animated on scroll using IntersectionObserver — fills the probability bars
+  (e.g., "83% prob+" → bar fills to 83%) when the section scrolls into view.
+- **Scroll-triggered sections:** Use `IntersectionObserver` with `threshold: 0.15` to fade in sections.
+  Same pattern as the static report.
+
+**When to extract daily predictions (preferred):**
+After running the BSTS model in Step 4, save the inference arrays:
+
+```python
+# After CausalImpact fit
+inf = ci.inferences
+export_df = pd.DataFrame({
+    'date': inf.index,
+    'observed': inf['response'],
+    'predicted': inf['preds'],
+    'ci_lower': inf['preds_lower'],
+    'ci_upper': inf['preds_upper']
+})
+export_df.to_csv('counterfactual_data.csv', index=False)
+# Then embed this CSV as JSON in the interactive HTML
+```
+
+**Use the `frontend-design` skill** for the HTML/CSS to ensure production-grade visual quality.
+Pass it the data structure, section layout, and design system (fonts, colours) from the existing
+static deliverables.
+
 ### When to use which
 
 | Format | Audience | Best for |
 |---|---|---|
+| **Interactive explorer** | **Client self-service** | **Email/share link — client explores robustness themselves** |
 | Slide deck | Client meeting | Live presentation, screen sharing |
-| Scrolling report | Client async | Email attachment, self-service reading |
+| Scrolling report | Client async | Email attachment, static self-service reading |
 | Jupyter notebook | Internal DS team | Verification, iteration, collaboration |
 | Markdown findings | Internal (Elena-style) | Quick sharing, PR review, documentation |
 
@@ -602,13 +701,13 @@ more covariates. In practice, the biggest improvements come from **removing** th
 
 | Action | Type | Typical impact |
 |---|---|---|
-| Exclude high-variance periods from pre-period | Subtraction | -19% CI width |
+| Exclude high-variance periods from pre-period | Subtraction | -27% CI width |
 | Remove contaminated covariates (changed during intervention) | Subtraction | +36% effect estimate, p halved |
 | Remove covariates redundant with built-in model components | Subtraction | Cleaner model, less noise |
-| Add better covariates (multi-modal seasonal intensity) | Addition | -11% CI width |
-| Add exogenous signals (weather, daylight) | Addition | -5% CI width |
+| Add better covariates (multi-modal holiday intensity) | Addition | -11% CI width |
+| Add exogenous signals (weather) | Addition | -3% CI width |
 
-In the example public safety analysis, this took p from 0.187 to 0.028 — all from the same data, same model
+In the The Retailer engagement, this took p from 0.223 to 0.039 — all from the same data, same model
 architecture. Three of five improvement steps were subtractions.
 
 **Practical workflow:** When p > 0.10, try these in order:
@@ -623,15 +722,15 @@ architecture. Three of five improvement steps were subtractions.
    whether the campaign could have influenced each covariate.
 
 2. **Binary flags for high-variance events** — use continuous intensity variables instead.
-   A binary `school_holiday_flag` can't explain why half-term differs from summer holidays.
+   A binary `sale_flag` can't explain why BF is 5x a normal sale day.
 
 3. **Claiming significance when p > 0.10** — destroys credibility. Be honest about uncertainty.
 
 4. **Too-long pre-periods with structural breaks** — if predictions get worse with more data,
    shorten the pre-period. Find the sweet spot.
 
-5. **Ignoring seasonal distortions** — school holidays introduce extreme variance that inflates
-   all credible intervals. Model them explicitly with intensity curves.
+5. **Ignoring the Christmas distortion** — for retail clients, BF/Christmas introduces extreme
+   variance that inflates all credible intervals. Model it explicitly.
 
 6. **Running only one method** — a single implementation might have bugs or assumptions that
    bias the result. Two independent methods with different inference engines is the gold standard.
@@ -639,42 +738,42 @@ architecture. Three of five improvement steps were subtractions.
 7. **Forgetting the dependency conflict** — tfcausalimpact and CausalPy cannot coexist in the
    same Python environment. Always run in separate scripts.
 
-8. **Including high-variance seasonal periods in the pre-period** — School holiday periods
-   can inflate credible intervals by 30%+. Test excluding them: start the pre-period after
-   the holiday ends. In the example public safety case, this reduced CI width by 19% and
-   improved p-value from 0.187 to 0.141 while the effect estimate remained stable. Always
-   run a pre-period sensitivity test with multiple start dates to find the optimal
-   noise/data tradeoff.
+8. **Including high-variance seasonal periods in the pre-period** — For retail clients, the
+   Christmas/Black Friday period can inflate credible intervals by 30%+. Test excluding it:
+   start the pre-period after Jan 6 (post-Christmas hangover). In the The Retailer case, this reduced
+   CI width from a wide CI to a narrower CI (-27%) and improved p-value from 0.215 to 0.163 while the
+   effect estimate remained stable (a moderate uplift vs a moderate uplift). Always run a pre-period sensitivity test
+   with multiple start dates to find the optimal noise/data tradeoff.
 
 ## Reference: Covariate Correlation Benchmarks
 
-From the example public safety analysis (daily accident count):
+From the The Retailer engagement (UK footwear retail, daily revenue):
 
-| Covariate | r with Accident Count | Notes |
+| Covariate | r with Revenue | Notes |
 |---|---|---|
-| construction_zones | +0.812 | Strong but check intervention safety |
-| rainfall_mm | +0.791 | Usually the safest control (exogenous) |
-| school_holiday_intensity | +0.691 | Multi-modal (half-term + summer + Christmas break) |
-| daylight_hours | -0.583 | Shorter days → more accidents |
-| temperature_avg | -0.342 | Cold/ice conditions increase risk |
-| bank_holiday_flag | +0.198 | Named public holidays |
-| traffic_volume | +0.167 | Check intervention safety — may be affected |
-| weekend_x_rainfall | +0.143 | Interaction term |
-| sin_dow / cos_dow | -0.091 / +0.006 | Low standalone but captures weekly cycle in model |
-| school_holiday_flag | -0.024 | Near-zero — binary flag is inadequate for seasonal patterns |
+| paid_sessions | +0.885 | Strong but check intervention safety |
+| organic_sessions | +0.863 | Usually the safest control |
+| xmas_intensity | +0.828 | Multi-modal v2 (BF spike + gift shopping + Boxing Day) |
+| kcp_period_flag | +0.523 | Key consumption period |
+| payday_window_flag | +0.213 | 25th–3rd spending window |
+| holiday_flag | +0.153 | Named public holidays |
+| paid_share | +0.140 | Media intensity ratio |
+| payday_x_weekend | +0.123 | Interaction term |
+| sin_dow / cos_dow | -0.078 / +0.004 | Low standalone but captures weekly cycle in model |
+| winter_sale_flag | -0.024 | Near-zero — binary flag is inadequate for retail peaks |
 
-These are benchmarks, not universals — always compute correlations for the specific dataset.
+These are benchmarks, not universals — always compute correlations for the specific client.
 
 ## Reference: Method Selection for Short Campaigns
 
-From the example public safety analysis — key lessons about which methods work for short interventions:
+From the The Retailer engagement — key lessons about which methods work for campaigns under 1 week:
 
 | Method | Result | Key Insight |
 |---|---|---|
-| **BSTS (tfcausalimpact)** | −18%, p=0.21, not significant | Global time series model — daily variance drowns out short effects |
+| **BSTS (tfcausalimpact)** | +22%, p=0.21, not significant | Global time series model — daily variance drowns out short effects |
 | **CausalPy (PyMC)** | Consistent, R²=0.72 | Confirms direction but same significance challenge |
-| **RDiT** | **−23 acc/day, CI [−38, −8] — significant** | Local boundary comparison avoids global variance problem |
-| **Conformal CI** | −21 acc/day, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
+| **RDiT** | **+18.3%, CI [£8K, £71K] — significant** | Local boundary comparison avoids global variance problem |
+| **Conformal CI** | a moderate uplift, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
 
 **Key strategic insight:** For short campaigns (< 7 days), **RDiT should be the lead method**, not BSTS.
 BSTS is powerful for long interventions where the full time series structure matters, but for short
@@ -682,26 +781,26 @@ campaigns the global variance dominates. RDiT focuses only on the local disconti
 sidestepping the noise problem entirely. Use BSTS as a supporting method for the full counterfactual
 decomposition, and RDiT for the significance claim.
 
-**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in the example
-public safety case — a dramatic improvement. Use the pre-period residual quantile approach: `np.quantile(np.abs(residuals), 0.95)`.
+**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in the The Retailer
+case — a dramatic improvement. Use the pre-period residual quantile approach: `np.quantile(np.abs(residuals), 0.95)`.
 
 **Fourier seasonality (k=1..4):** Did NOT help with ~17 months of data (+0.9% CI width). Requires 2+ full
 annual cycles to learn meaningful patterns. Don't add Fourier terms unless the pre-period spans 2+ years.
 
 ## Reference: Pre-period Start Date Sensitivity
 
-From the example public safety analysis (daily accident count):
+From the The Retailer engagement (UK footwear retail):
 
 | Start Date | Description | Days | CI Width Impact | p-value |
 |---|---|---|---|---|
-| Aug 2025 | Full data (with summer holidays) | 187 | Baseline | 0.187 |
-| Sep 8 2025 | Post-summer-holiday (recommended) | 148 | -19% | 0.141 |
-| Oct 2025 | After half-term | 126 | -22% | 0.152 |
-| Nov 2025 | Winter onward | 95 | -24% | 0.138 |
+| Oct 2024 | Full data (with Christmas) | 514 | Baseline | 0.215 |
+| Jan 6 2025 | Post-Christmas (recommended) | 417 | -27% | 0.163 |
+| Feb 2025 | Post-winter-sale | 391 | -30% | 0.183 |
+| Mar 2025 | Spring onward | 363 | -31% | 0.161 |
 
-The sweet spot is usually just after the major seasonal disruption — enough data to learn
-patterns, but excluding the period that dominates the variance. For traffic safety, starting
-after school holidays resume is a reliable default.
+The sweet spot is usually just after the major seasonal peak — enough data to learn patterns,
+but excluding the period that dominates the variance. For UK retail, Jan 6 (post-Christmas
+hangover) is a reliable default.
 
 ## Reference: Environment & Dependency Gotchas
 
