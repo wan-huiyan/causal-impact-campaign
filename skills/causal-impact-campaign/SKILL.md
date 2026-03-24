@@ -710,11 +710,68 @@ more covariates. In practice, the biggest improvements come from **removing** th
 In the The Retailer engagement, this took p from 0.223 to 0.039 — all from the same data, same model
 architecture. Three of five improvement steps were subtractions.
 
+**Critical caveat: specification search.** If you test N specifications and report the one with
+the lowest p-value, the result is exploratory, not confirmatory. In the The Retailer engagement, 48
+experiments were conducted. The best spec (p<0.05) was an outlier — all 6 sensitivity specs
+had p=0.18-0.24. A multi-agent review panel flagged this as the central methodological concern.
+The honest framing is: "The primary specification produces p=0.21. An optimised specification
+achieves p<0.05, but this should be treated as exploratory." See the Claim Framing Guide below.
+
 **Practical workflow:** When p > 0.10, try these in order:
 1. Shorten the pre-period (exclude high-variance events)
 2. Run the combined covariate audit — remove anything that changed >10% during intervention
 3. Check for redundancy with built-in model components (e.g., nseasons)
 4. THEN add better covariates (intensity curves, weather, interactions)
+
+**But:** Document every experiment. If the "best" spec is the only one that achieves significance,
+it is exploratory. Lead with the Bayesian posterior probability across ALL specs, not the
+cherry-picked p-value.
+
+## Claim Framing Guide (from adversarial review)
+
+A multi-agent review panel (Statistical Rigor Reviewer, Feasibility Analyst, Code Quality
+Auditor, Devil's Advocate + Supreme Judge) identified this as the most critical lesson:
+
+**The client doesn't need p < 0.05. They need to know whether to run the promo again.**
+
+### What to lead with (in all deliverables)
+
+```
+"There is an 80-96% probability the promo generated positive incremental revenue,
+estimated £190-250K across all specifications. All methods agree on direction.
+The promo drove conversion (+14%), not traffic."
+```
+
+### What NOT to lead with
+
+```
+"The promo generated a significant uplift, statistically significant at p < 0.05."
+(Unless this was the pre-registered primary specification)
+```
+
+### Scorecard framing
+
+When showing validation scorecards across deliverables:
+- **All deliverables must show the same primary p-value.** If the deck says "Pass" and the
+  report says "Fail" for the same test, the client loses trust immediately.
+- Show the primary (first-specified or pre-registered) p-value as the main result.
+- If an optimised spec achieves a better p-value, show it separately labeled "Exploratory."
+- The convergence of all specs on a positive direction IS the strongest evidence — foreground it.
+
+### The specification search trap
+
+| What you did | How to frame it |
+|---|---|
+| Pre-registered one spec, it was significant | Lead with it. This is confirmatory. |
+| Tested N specs, all significant | Lead with the range. This is robust. |
+| Tested N specs, best one is significant | **Lead with the range. Best spec is exploratory.** |
+| Tested N specs, none significant | Lead with Bayesian posterior and direction consistency. |
+
+### Synthetic data in charts
+
+Never use `Math.random()` for client-facing charts without a clear "illustrative" label.
+Always export `ci.inferences` during the analysis step and embed real model predictions.
+A client who reloads the page and sees different numbers will question everything.
 
 ## Key Pitfalls to Avoid
 
@@ -725,6 +782,11 @@ architecture. Three of five improvement steps were subtractions.
    A binary `sale_flag` can't explain why BF is 5x a normal sale day.
 
 3. **Claiming significance when p > 0.10** — destroys credibility. Be honest about uncertainty.
+
+3b. **Claiming significance from specification search** — if you tested N specs and only the
+   "best" achieved p < 0.05, the result is exploratory. Bonferroni correction: multiply p by N.
+   Lead with the Bayesian posterior across all specs instead. This was the #1 finding from
+   adversarial review of the The Retailer deliverables.
 
 4. **Too-long pre-periods with structural breaks** — if predictions get worse with more data,
    shorten the pre-period. Find the sweet spot.
