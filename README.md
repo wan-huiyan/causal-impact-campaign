@@ -30,7 +30,12 @@ Claude: I'll run the full causal impact pipeline...
 
 *(Synthetic example — numbers are illustrative. Works with any metric, intervention, and time series.)*
 
-The skill auto-triggers when you mention "causal impact", "campaign uplift", "did the campaign work", or want to measure the effect of any intervention on a time series.
+The skill auto-triggers when you mention "causal impact", "campaign uplift", "did the campaign work", or want to measure the effect of any intervention on a time series. Additional triggers:
+- "Did the promotion actually increase revenue?"
+- "How much additional revenue did the campaign generate?"
+- "Is the revenue change from the campaign or just seasonality?"
+- "Estimate the ROI of our marketing intervention"
+- "The p-value is 0.12 — did it work?"
 
 ## Installation
 
@@ -246,10 +251,15 @@ Built from real causal inference methodology applied to public policy analysis. 
 
 | Version | Changes |
 |---------|---------|
+| 1.4.0 | Enrich trigger description, add eval suite, add composability metadata (schliff score: 61.0 → 75.5) |
 | 1.3.0 | Claim Framing Guide from adversarial review — specification search warnings, scorecard consistency rules, Bayesian posterior framing |
 | 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |
 | 1.1.0 | CausalPy model selection guide (5 classes), quadratic time trend, internal notebook |
 | 1.0.0 | Initial release: dual-method analysis, RDiT, conformal CIs, power analysis, HTML deliverables |
+
+## Acknowledgements
+
+Trigger accuracy and eval suite improved using [schliff](https://github.com/Zandereins/schliff) — an autonomous skill scoring and improvement framework (composite score: 61.0 → 75.5).
 
 ## License
 
