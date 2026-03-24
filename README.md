@@ -100,6 +100,7 @@ Every causal analysis follows the same pattern: a promising-but-not-significant 
 - **Before/after isn't causation.** Without a counterfactual, "accidents dropped 15%" could be weather, seasonality, or regression to the mean. The skill constructs a Bayesian synthetic control and measures the gap with proper uncertainty.
 - **Single-method fragility.** One p-value from one method doesn't convince stakeholders (or reviewers). The skill runs two independent methods (BSTS + RDiT) — agreement between them is stronger evidence than any single result.
 - **Overclaiming kills credibility.** Presenting a marginal result as definitive, or a short campaign as conclusive, damages trust. The skill estimates minimum detectable effect upfront and uses calibrated language ("likely" not "definitely" for 90-95% probability).
+- **Specification search disguised as robustness.** Testing N specs and headlining the one that crosses p<0.05 is not discovery — it's the garden of forking paths. An adversarial review of the Schuh deliverables caught this: 48 experiments, only the "best" hit p<0.05. The skill now includes a Claim Framing Guide that distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results and leads with the Bayesian posterior across ALL specs.
 
 ### Methodological traps (these save hours)
 
@@ -245,6 +246,7 @@ Built from real causal inference methodology applied to public policy analysis. 
 
 | Version | Changes |
 |---------|---------|
+| 1.3.0 | Claim Framing Guide from adversarial review — specification search warnings, scorecard consistency rules, Bayesian posterior framing |
 | 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |
 | 1.1.0 | CausalPy model selection guide (5 classes), quadratic time trend, internal notebook |
 | 1.0.0 | Initial release: dual-method analysis, RDiT, conformal CIs, power analysis, HTML deliverables |
