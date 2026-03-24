@@ -1,0 +1,463 @@
+{
+  "skill_name": "causal-impact-campaign",
+  "version": "1.0.0",
+  "created_by": "manual",
+  "triggers": [
+    {
+      "id": "pos-1",
+      "prompt": "Did the campaign actually work? I need to measure the revenue uplift from our Black Friday promo.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Direct trigger: 'did the campaign work' + revenue uplift"
+    },
+    {
+      "id": "pos-2",
+      "prompt": "Measure the causal impact of our delivery promotion on daily revenue",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Exact phrase: 'causal impact' + campaign context"
+    },
+    {
+      "id": "pos-3",
+      "prompt": "What was the incrementality of our paid social campaign last month?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger keyword: 'incrementality' + campaign"
+    },
+    {
+      "id": "pos-4",
+      "prompt": "We ran a free delivery promo for 10 days — can you estimate the revenue lift?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'revenue lift' + promo with time-bounded intervention"
+    },
+    {
+      "id": "pos-5",
+      "prompt": "I want to attribute the conversion spike to the price reduction we did in March",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Attribution of metric change to specific intervention"
+    },
+    {
+      "id": "pos-6",
+      "prompt": "Can you measure the promo effect on our e-commerce transactions using our GA4 data?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'promo effect' + GA4 data"
+    },
+    {
+      "id": "pos-7",
+      "prompt": "We need to run a campaign uplift analysis — we have daily revenue data in BigQuery",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'campaign uplift' + BigQuery data source"
+    },
+    {
+      "id": "pos-8",
+      "prompt": "How much additional revenue did our marketing campaign generate? There's no control group.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "No control group + campaign effect measurement — exactly this skill's niche"
+    },
+    {
+      "id": "pos-9",
+      "prompt": "Use Bayesian structural time series to estimate the effect of our ad spend increase",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Explicit methodology mention: BSTS + intervention effect"
+    },
+    {
+      "id": "pos-10",
+      "prompt": "Did the price change cause the revenue drop, or was it just seasonal?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Causal attribution question: price change effect vs seasonality"
+    },
+    {
+      "id": "pos-11",
+      "prompt": "Run tfcausalimpact and CausalPy on our campaign data to cross-validate the results",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Exact tools mentioned: tfcausalimpact + CausalPy dual method"
+    },
+    {
+      "id": "pos-12",
+      "prompt": "We launched a site-wide 20% discount last week. What was the true effect on conversions?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Time-bounded intervention + causal effect on metric"
+    },
+    {
+      "id": "pos-13",
+      "prompt": "Quantify the ROI of our influencer campaign using counterfactual analysis",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Counterfactual analysis of campaign ROI"
+    },
+    {
+      "id": "pos-14",
+      "prompt": "I need to present to stakeholders whether our marketing intervention moved the needle on revenue",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Client-facing deliverable about intervention effectiveness"
+    },
+    {
+      "id": "pos-15",
+      "prompt": "Estimate the causal uplift from our email campaign using time series data",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'causal uplift' + time series"
+    },
+    {
+      "id": "neg-1",
+      "prompt": "Set up an A/B test for our new checkout flow with random assignment",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "A/B testing with randomization — different methodology"
+    },
+    {
+      "id": "neg-2",
+      "prompt": "Show me the correlation between ad spend and revenue over the last year",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Correlation analysis, not causal impact estimation"
+    },
+    {
+      "id": "neg-3",
+      "prompt": "Forecast next quarter's revenue using Prophet or ARIMA",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Time series forecasting, not intervention effect measurement"
+    },
+    {
+      "id": "neg-4",
+      "prompt": "Build a marketing attribution model across all our channels",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Multi-touch attribution — different from single-campaign causal impact"
+    },
+    {
+      "id": "neg-5",
+      "prompt": "Create a dashboard showing our key marketing metrics over time",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "General analytics dashboard, not causal analysis"
+    },
+    {
+      "id": "neg-6",
+      "prompt": "Analyze customer segments and their purchase patterns",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Customer segmentation, not campaign impact"
+    },
+    {
+      "id": "neg-7",
+      "prompt": "Help me design a randomized controlled experiment to test pricing",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "RCT design — opposite of observational causal inference"
+    },
+    {
+      "id": "neg-8",
+      "prompt": "What's the best way to do media mix modeling?",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "MMM is a different methodology from campaign-level causal impact"
+    },
+    {
+      "id": "neg-9",
+      "prompt": "Optimize our Google Ads bidding strategy using machine learning",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Ad optimization, not post-hoc impact measurement"
+    },
+    {
+      "id": "neg-10",
+      "prompt": "Build a churn prediction model from our user data",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Predictive modeling, not causal inference"
+    },
+    {
+      "id": "neg-11",
+      "prompt": "Write a SQL query to calculate monthly revenue growth",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Simple SQL analytics, not causal analysis"
+    },
+    {
+      "id": "neg-12",
+      "prompt": "Compare the performance of our email campaigns using open rates and CTR",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Campaign performance reporting, not causal impact estimation"
+    },
+    {
+      "id": "edge-1",
+      "prompt": "Our campaign only ran for 3 days — can we still measure the impact?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Very short campaign — skill covers this with SNR warnings"
+    },
+    {
+      "id": "edge-2",
+      "prompt": "We had two promotions running at the same time — can you separate their effects?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Concurrent interventions — skill addresses confounding"
+    },
+    {
+      "id": "edge-3",
+      "prompt": "Is the revenue increase from the campaign or just the normal Christmas spike?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Seasonality confounding — core challenge addressed by skill"
+    },
+    {
+      "id": "edge-4",
+      "prompt": "We have a geo-targeted campaign — should we use synthetic control instead?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Geo-targeting enables stronger designs — skill mentions this"
+    },
+    {
+      "id": "edge-5",
+      "prompt": "Can you measure campaign effect if we only have weekly aggregated data?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Data granularity limitation — skill assumes daily but should handle"
+    },
+    {
+      "id": "edge-6",
+      "prompt": "The p-value is 0.12 — does that mean the campaign didn't work?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Statistical interpretation — skill covers honest communication of marginal results"
+    },
+    {
+      "id": "edge-7",
+      "prompt": "Run a difference-in-differences analysis on our campaign data",
+      "should_trigger": false,
+      "category": "edge",
+      "notes": "DiD is adjacent but different from BSTS causal impact — borderline"
+    },
+    {
+      "id": "edge-8",
+      "prompt": "We want to measure if changing our delivery policy affected order volume",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Policy change as intervention — fits the skill even without 'campaign' keyword"
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "tc-1",
+      "prompt": "We ran a free delivery promotion from March 1-10 and want to know if it actually increased revenue. We have daily GA4 data in BigQuery.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(causal|counterfactual|intervention|treatment)",
+          "description": "Frames as causal inference problem"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(covariate|control|organic|session)",
+          "description": "Discusses covariate selection and safety"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(tfcausalimpact|causalpy|bayesian|BSTS)",
+          "description": "References the dual-method approach"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(pre.?period|post.?period|intervention.?date|window)",
+          "description": "Defines analysis windows"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(credible|confidence|interval|p.?value|significance)",
+          "description": "Discusses statistical inference"
+        }
+      ]
+    },
+    {
+      "id": "tc-2",
+      "prompt": "Did our Black Friday campaign work? Revenue jumped but it might just be seasonal. We have 2 years of daily data.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(seasonal|holiday|Black Friday|cycle)",
+          "description": "Addresses seasonality as a confounder"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(covariate|control|organic)",
+          "description": "Discusses safe covariates for seasonal isolation"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(validate|validation|placebo|assumption)",
+          "description": "Includes validation steps"
+        }
+      ]
+    },
+    {
+      "id": "tc-3",
+      "prompt": "Measure the incrementality of our paid social campaign. We have daily revenue and traffic data but no holdout group.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(no.*(control|holdout|randomiz)|observational|quasi.?experiment)",
+          "description": "Acknowledges lack of randomized control"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(paid.*session|traffic|absorb|bias|safe)",
+          "description": "Warns about paid traffic covariates absorbing signal"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(incremental|uplift|effect|impact)",
+          "description": "Quantifies incremental effect"
+        }
+      ]
+    },
+    {
+      "id": "tc-4",
+      "prompt": "Our stakeholders want a client-ready report on whether the marketing campaign lifted conversions. Make it non-technical.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(client|stakeholder|non.?technical|plain|executive)",
+          "description": "Adapts communication for non-technical audience"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(visual|chart|plot|graph|HTML|Plotly)",
+          "description": "Includes visualization deliverables"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(finding|conclusion|recommend|summary)",
+          "description": "Produces actionable findings"
+        }
+      ]
+    },
+    {
+      "id": "tc-5",
+      "prompt": "Run causal impact analysis but the campaign was only 4 days long and our revenue is very volatile.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(short|brief|few days|limited|duration)",
+          "description": "Acknowledges short campaign duration challenge"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(SNR|signal.?to.?noise|volatil|noisy|detect)",
+          "description": "Discusses signal-to-noise ratio"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(warn|caveat|limitation|may not|difficult|unlikely)",
+          "description": "Sets appropriate expectations about statistical power"
+        }
+      ]
+    },
+    {
+      "id": "tc-6",
+      "prompt": "Compare tfcausalimpact and CausalPy results — they disagree on whether the promo had an effect. How do I interpret this?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(disagree|conflict|differ|inconsist|diverge)",
+          "description": "Addresses method disagreement"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(robust|sensitiv|cross.?valid|both|converge)",
+          "description": "Discusses cross-method robustness"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(interpret|conclude|honest|uncertain|direction)",
+          "description": "Provides honest interpretation guidance"
+        }
+      ]
+    }
+  ],
+  "edge_cases": [
+    {
+      "id": "ec-1",
+      "prompt": "causal impact",
+      "category": "minimal_input",
+      "expected_behavior": "Ask for context: what campaign, what metric, what data is available",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(what|which|campaign|metric|data|tell me|describe|context)",
+          "description": "Asks for clarification about the specific campaign and data"
+        }
+      ]
+    },
+    {
+      "id": "ec-2",
+      "prompt": "We had 5 different campaigns running simultaneously over the same period. Measure each one's impact separately.",
+      "category": "concurrent_interventions",
+      "expected_behavior": "Warn that concurrent interventions confound each other, suggest alternative approaches",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(confound|overlap|simultaneous|concurrent|separate|isolate|difficult)",
+          "description": "Identifies the confounding problem"
+        }
+      ]
+    },
+    {
+      "id": "ec-3",
+      "prompt": "Measure the campaign impact but we only have 2 weeks of pre-campaign data",
+      "category": "insufficient_data",
+      "expected_behavior": "Warn about insufficient pre-period for reliable counterfactual estimation",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(insufficient|short|more data|longer|pre.?period|minimum|at least)",
+          "description": "Warns about insufficient pre-period data"
+        }
+      ]
+    },
+    {
+      "id": "ec-4",
+      "prompt": "The causal impact shows the campaign had a negative effect — the client won't accept this. What do I do?",
+      "category": "stakeholder_conflict",
+      "expected_behavior": "Guide honest communication, validate the result, do not suggest hiding it",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(honest|transparent|validate|verify|check|robust|present)",
+          "description": "Advocates for honest statistical communication"
+        }
+      ]
+    },
+    {
+      "id": "ec-5",
+      "prompt": "Can I use causal impact analysis on monthly data? We only have 18 monthly data points.",
+      "category": "low_granularity",
+      "expected_behavior": "Explain limitations of monthly granularity and low sample size for BSTS",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(monthly|granular|few|observation|sample|power|limited|daily)",
+          "description": "Addresses monthly granularity limitations"
+        }
+      ]
+    }
+  ]
+}
