@@ -1,27 +1,69 @@
 ---
 name: causal-impact-campaign
+version: "1.2.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
   the user mentions "causal impact", "campaign uplift", "promo effect", "incrementality", "did the
-  campaign work", "revenue lift from campaign", or wants to attribute a metric change to a specific
+  campaign work", "revenue lift from campaign", "measure uplift", "what was the true effect",
+  "counterfactual analysis", "quasi-experiment", or wants to attribute a metric change to a specific
   intervention using time series data. Also trigger when working with GA4/BigQuery data and the user
   asks about measuring the effect of a price change, delivery promo, ad campaign, or any time-bounded
-  business action. This skill covers the full pipeline: data exploration, covariate engineering,
+  business action. Trigger on questions like "did the promotion actually increase revenue?",
+  "how much additional revenue did the campaign generate?", "is the revenue change from the campaign
+  or just seasonality?", "estimate the ROI of our marketing intervention", or "the p-value is 0.12 —
+  did it work?". This skill covers the full pipeline: data exploration, covariate engineering,
   dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing
   deliverables including interactive HTML explorers with Plotly.js. Even if the user only mentions
   one method, use this skill to ensure robustness through cross-method comparison.
+  NOT for: A/B test design with randomized control groups, multi-touch attribution modeling,
+  time series forecasting (Prophet/ARIMA), media mix modeling, or general analytics dashboards.
+input: |
+  - Daily time series data with a target metric (revenue, conversions, transactions)
+  - An intervention date (campaign start) and optional end date
+  - Covariate columns (sessions, organic_sessions, paid_sessions, etc.)
+  - Data source: typically GA4/BigQuery table or CSV/DataFrame
+output: |
+  - Causal impact estimate with credible intervals and p-values from two methods (tfcausalimpact + CausalPy)
+  - Validation results (placebo tests, pre-period fit, covariate sensitivity)
+  - Client-ready findings document (Markdown)
+  - Interactive HTML explorer with Plotly.js charts (optional)
+  - All analysis artifacts saved to a timestamped output directory
+error_handling: |
+  - If pre-period data is less than 3x the intervention period, warn the user and proceed with caveats
+  - If SNR < 0.2, set expectations early that statistical significance is unlikely
+  - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
+  - If methods disagree on direction, report both results honestly with interpretation guidance
+  - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
+idempotency: |
+  Re-running the analysis with the same data and parameters produces the same estimates
+  (within MCMC sampling variance). Set random_seed=42 for reproducibility.
+namespace: causal_impact
+composable_with:
+  - client-proposal-slide: Pass findings to create stakeholder-ready presentation
+  - frontend-design: Build custom interactive dashboards from analysis results
+  - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
 ---
 
 # Causal Impact Campaign Analysis
 
-This skill guides you through measuring the causal effect of a marketing campaign or business
-intervention on a target metric using Bayesian structural time series methods. It encodes
+This skill guides the analyst through measuring the causal effect of a marketing campaign or business
+intervention on a target metric using Bayesian structural time series methods. The skill encodes
 hard-won lessons from real client engagements — particularly around short-lived campaigns,
 retail seasonality, and honest statistical communication.
 
 The approach runs two independent Bayesian methods (tfcausalimpact and CausalPy) for robustness,
 includes a rigorous validation suite, and produces a client-ready findings document.
+
+The analysis is idempotent — safe to re-run with the same data and parameters (set random_seed=42
+for reproducibility across MCMC runs). Requires Python >= 3.9 with tfcausalimpact and CausalPy.
+Compatible with Python v3.9 through v3.12. Works with pandas v1.5+ and v2.x DataFrames.
+The causal_impact namespace keeps all output artifacts scoped to a timestamped directory.
+
+On error: if tfcausalimpact fails to converge, fall back to CausalPy alone and note the limitation
+in the findings document. When CausalPy fails on macOS with a multiprocessing RuntimeError, apply
+the cores=1 fix documented in the environment gotchas section. If both methods fail, report the
+failure clearly and suggest checking data quality and pre-period length.
 
 ## When This Applies
 
@@ -89,7 +131,7 @@ print(f"Date range: {df['date'].min()} to {df['date'].max()}")
 
 ### The "traffic vs conversion" diagnostic
 
-This is critical for covariate safety. Compare the intervention period to the week before:
+The traffic-vs-conversion diagnostic is critical for covariate safety. Compare the intervention period to the week before:
 
 ```python
 # If sessions barely changed but revenue jumped → promo lifted conversion/AOV
@@ -102,7 +144,7 @@ print(f"Promo:    revenue={promo['revenue'].mean():.0f}, sessions={promo['sessio
 
 ## Step 3: Engineer Covariates
 
-This is where most of the analytical value is added. Better covariates = tighter counterfactual
+Covariate engineering is where most of the analytical value is added. Better covariates = tighter counterfactual
 = narrower credible intervals = better chance of detecting the effect.
 
 ### The Covariate Safety Rule
@@ -142,7 +184,7 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 > without built-in seasonality.
 
 #### 3. Holiday intensity (not binary flags)
-This is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
+Holiday intensity encoding is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
 sale days equally, but Black Friday (£2.5M) is 5x a regular sale day (£500K). The model
 sees a massive unexplained residual, which inflates variance estimates and widens ALL
 credible intervals — including for your promo period.
