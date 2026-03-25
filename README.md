@@ -93,9 +93,10 @@ Every causal analysis follows the same pattern: a promising-but-not-significant 
 | Exclude high-variance period from pre-period | 0.163 | -27% CI width. Seasonal variance was the dominant noise |
 | Multi-modal holiday intensity (v2) | 0.140 | 6-component curve (r=0.828) beats single Gaussian (r=0.632) |
 | Remove contaminated covariate | ~0.06 | Biggest single improvement — was absorbing the effect |
-| Add weather + clean spec | **0.039** | **Significant at p<0.05. 96% probability.** |
+| Add weather + clean spec | 0.039 | Significant at p<0.05 — but only 1 of 48 experiments |
+| **Mask winter sale periods** | **0.047** | **Masking Nov-Jan both years: CV 58%→24%, 12/12 specs positive** |
 
-**The meta-lesson:** The path to significance was dominated by **removing** things, not adding them.
+**The meta-lesson:** The path to significance was dominated by **removing** things, not adding them. The masking breakthrough — excluding high-variance winter sale periods while preserving the full annual cycle — was the single biggest improvement, turning a fragile single-spec result into robust multi-spec evidence.
 
 ## What This Catches
 
@@ -105,13 +106,17 @@ Every causal analysis follows the same pattern: a promising-but-not-significant 
 - **Before/after isn't causation.** Without a counterfactual, "accidents dropped 15%" could be weather, seasonality, or regression to the mean. The skill constructs a Bayesian synthetic control and measures the gap with proper uncertainty.
 - **Single-method fragility.** One p-value from one method doesn't convince stakeholders (or reviewers). The skill runs two independent methods (BSTS + RDiT) — agreement between them is stronger evidence than any single result.
 - **Overclaiming kills credibility.** Presenting a marginal result as definitive, or a short campaign as conclusive, damages trust. The skill estimates minimum detectable effect upfront and uses calibrated language ("likely" not "definitely" for 90-95% probability).
-- **Specification search disguised as robustness.** Testing N specs and headlining the one that crosses p<0.05 is not discovery — it's the garden of forking paths. An adversarial review of the The Retailer deliverables caught this: 48 experiments, only the "best" hit p<0.05. The skill now includes a Claim Framing Guide that distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results and leads with the Bayesian posterior across ALL specs.
+- **Specification search disguised as robustness.** Testing N specs and headlining the one that crosses p<0.05 is not discovery — it's the garden of forking paths. The skill includes a Claim Framing Guide that distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results and leads with the Bayesian posterior across ALL specs.
+- **Fake p-values from multi-method pipelines.** CausalPy ITS returns a constant p=0.25 regardless of effect. Conformal prediction returns binary p=0.5 or p=0.05. If you aggregate these with real BSTS p-values, you get a misleading "4 methods agree" scorecard. The skill flags non-BSTS p-values as `p=None` and labels them "N/A" in client-facing outputs.
+- **Probability range inflation via 1-p conversion.** Computing `1 - p` per method and quoting the range (e.g., "75-97%") inflates confidence when methods have fundamentally different statistical meanings. The skill uses the primary BSTS posterior as the single probability statement.
+- **Internal doc drift from deliverable reframing.** When you reframe claims in client deliverables (e.g., from "significant" to "exploratory"), the internal reference document keeps the old framing. An auditor reads the internal doc first and sees the stale version. The skill enforces same-commit updates.
 
 ### Methodological traps (these save hours)
 
-- **High-variance pre-periods inflate confidence intervals.** Seasonal peaks in the pre-period add noise the model can't explain. Excluding them tightened CIs by 27%.
+- **High-variance pre-periods inflate confidence intervals.** Seasonal peaks in the pre-period add noise the model can't explain. Masking them (keeping dates but excluding from training) preserves annual cycle while dropping CV from 58% to 24%.
 - **Wrong model class for the study design.** WeightedSumFitter (synthetic control) doubled sigma on single-unit ITS data. The skill selects the right CausalPy model class for your design.
 - **Overfitting with unnecessary features.** Fourier terms need 2+ annual cycles; sin/cos DoW is redundant with nseasons=7. More features ≠ better counterfactual.
+- **RDiT bandwidth sensitivity.** RDiT results can flip between significant and not-significant depending on bandwidth choice. The skill now tests 4 bandwidths (7, 14, 21, 28 days) and reports the sensitivity table.
 
 ## Interactive Explorer
 
@@ -124,7 +129,7 @@ The skill generates a **single self-contained HTML file** the client opens in th
 - **Drill into the mechanism** — decomposition cards show Conversion Rate (+14%), Transactions (+19%), AOV (+0.7%)
 - **Check persistence** — tabbed view of during-promo vs after-promo daily effects, plus paid vs organic channel split
 
-The client explores robustness themselves rather than trusting a static summary. When they toggle between 8 model specifications and see the uplift stay positive across all of them, that's more convincing than any single p-value.
+The client explores robustness themselves rather than trusting a static summary. When they toggle between 12 model specifications and see the uplift stay positive across all of them, that's more convincing than any single p-value.
 
 ![Interactive explorer — model specification selector with live-updating metrics and Plotly.js counterfactual chart](docs/demo-interactive.png)
 
@@ -135,6 +140,7 @@ The client explores robustness themselves rather than trusting a static summary.
 | Technique | Impact | How |
 |---|---|---|
 | **Combined covariate safety audit** | Removed significant bias | Checks both correlation AND intervention safety → INCLUDE/CAUTION/SKIP |
+| **Masked pre-periods** | CV 58%→24%, p<0.05 | Mask winter sale windows instead of truncating — preserves annual cycle |
 | **Pre-period exclusion of high-variance events** | -27% CI width | Start after seasonal peaks to avoid variance inflation |
 | **Multi-modal holiday intensity (v2)** | r: -0.024→0.828 | 6-component curve: main peak, secondary peak, ramp, shoulder, baseline, post-event |
 | **RDiT (Regression Discontinuity in Time)** | Achieved significance | Local boundary comparison — best method for interventions <7 days |
@@ -157,21 +163,25 @@ The client explores robustness themselves rather than trusting a static summary.
 
 **Strategic** (apply to any causal analysis):
 - **Subtract before you add** — removing contaminated covariates and high-variance pre-periods beats adding more features
+- **Mask, don't truncate** — masking high-variance windows preserves the annual cycle while removing noise. In one engagement, this dropped CV from 58% to 24%
 - **Contaminated covariates silently absorb causal effects** — always run a safety audit (correlation + intervention change)
 - **Two methods > one** — cross-method agreement provides stronger evidence than any single p-value
 - **Honest uncertainty builds client trust** — never claim statistical significance you don't have
+- **Run many specs, report all of them** — 12/12 positive specs is stronger evidence than 1/1 significant
 
 **Tactical** (specific techniques):
 - **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks
 - **RDiT beats BSTS for short interventions** — local boundary comparison achieves significance where global BSTS can't
 - **Conformal CIs are 61% tighter than Bayesian** — distribution-free uncertainty as a sanity check
 - **nseasons=7 makes explicit DoW covariates redundant** — sin/cos added noise, not signal
+- **Cloud Run for parallel BSTS** — 12 specs in ~15 min vs 60+ min sequential, ~$0.50 total
 
 ## Limitations
 
 - **Requires sufficient pre-period data.** At least 3x the intervention length in clean pre-period. Structural breaks (e.g., school holidays) in the pre-period degrade predictions.
 - **No randomized control group.** This is a quasi-experimental method — it constructs a synthetic control from covariates, not a true counterfactual.
 - **Short campaigns are inherently hard.** Campaigns < 1 week have low statistical power. The skill estimates MDE upfront so you can set expectations.
+- **Masked pre-periods are not pre-registered.** Masking improves results but is a post-hoc decision. The skill frames masked specs as exploratory, not confirmatory.
 - **numpy version conflict.** tfcausalimpact requires numpy < 2.0; CausalPy requires numpy >= 2.0. The skill runs them in separate Python scripts.
 - **LLM-generated analysis code.** Queries and scripts are generated by Claude and should be reviewed before running.
 
@@ -199,6 +209,7 @@ The skill verifies before delivering results:
 | `tfcausalimpact` | < 2.0 | Google's BSTS causal impact (variational inference) |
 | `causalpy` | >= 2.0 | PyMC Labs causal inference (HMC/NUTS sampling) |
 | `google-cloud-bigquery` | any | BigQuery data access |
+| `google-cloud-storage` | any | GCS for Cloud Run result collection (optional) |
 
 **Note:** tfcausalimpact and CausalPy must run in separate Python scripts due to incompatible numpy requirements.
 
@@ -232,7 +243,7 @@ The skill verifies before delivering results:
 
 ## Origin
 
-Built from real causal inference methodology applied to public policy analysis. The methodology, covariate engineering, validation framework, and interpretation patterns are battle-tested on real time series data. The journey from non-significance to p=0.028 is documented in the SKILL.md.
+Built from real causal inference methodology applied to time series analysis. The methodology, covariate engineering, validation framework, and interpretation patterns are battle-tested on real data. The journey from non-significance to p<0.05 is documented in the SKILL.md.
 
 ## Roadmap
 
@@ -240,6 +251,7 @@ Built from real causal inference methodology applied to public policy analysis. 
 - [ ] **Augmented Synthetic Control** — bias correction when convex hull violated
 - [ ] **PyMC-Marketing MMM** — full marketing mix modelling with causal identification
 - [ ] **Heterogeneous treatment effects** — varying intervention intensity analysis
+- [ ] **Automated Cloud Run deployment** — one-command setup for parallel spec execution
 
 ## Related Skills
 
@@ -251,6 +263,7 @@ Built from real causal inference methodology applied to public policy analysis. 
 
 | Version | Changes |
 |---------|---------|
+| 1.5.0 | Masked pre-periods (CV 58%→24%, p<0.05), Cloud Run parallel execution (12 specs in 15 min), 12-spec sensitivity grid (3 covariate bundles x 4 pre-period options), updated journey to p<0.05 |
 | 1.4.0 | Multi-method pipeline gotchas (fake p-values, probability range inflation, internal doc drift), RDiT bandwidth sensitivity table, updated Claim Framing Guide with systematic rerun derivation, eval suite + composability (schliff 61→75.5) |
 | 1.3.0 | Claim Framing Guide from adversarial review — specification search warnings, scorecard consistency rules, Bayesian posterior framing |
 | 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |

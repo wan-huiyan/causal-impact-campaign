@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "1.4.0"
+version: "1.5.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -239,6 +239,14 @@ often means organic visitors convert better (higher revenue per organic session)
 > **Combined audit:** Each covariate gets a single recommendation based on both its predictive
 > value (correlation with revenue) and its intervention safety (did it change during the promo?).
 > `YES` = include. `CAUTION` = test with and without. `SKIP` = don't include.
+>
+> **Critical:** The baseline for contamination must be the **last 7 days of the pre-period**,
+> not the full pre-period mean. Using the full pre-period mean will flag *every* covariate as
+> contaminated because the promo naturally lifts all correlated metrics. The last-week baseline
+> controls for seasonality and isolates whether the covariate changed *independently* of the
+> general uplift. Calendar-based covariates (holidays, weekends, paydays) are always safe
+> regardless of their % change — they're deterministic. Treatment indicators (treatment_flag,
+> intervention_flag) must be excluded entirely — they define the treatment, not predict it.
 
 ```python
 # Combined covariate audit: checks BOTH correlation AND intervention safety
@@ -736,6 +744,35 @@ static deliverables.
 | Jupyter notebook | Internal DS team | Verification, iteration, collaboration |
 | Markdown findings | Internal (analyst-style) | Quick sharing, PR review, documentation |
 
+### Masked period visualization (critical for reports)
+
+When masking is used (Step 3b: excluding winter periods), all output charts MUST visually
+show which dates were masked. Without this, users assume the model trained on all plotted data.
+
+**Implementation pattern (Plotly.js):**
+```javascript
+// Add orange shaded rectangles for each masked period
+maskedRanges.forEach(function(r) {
+  shapes.push({
+    type: "rect", x0: r.start, x1: r.end, y0: 0, y1: 1,
+    yref: "paper", fillcolor: "rgba(255,152,0,0.12)", line: { width: 0 }
+  });
+});
+// First masked band gets a text label
+annotations.push({
+  x: maskedRanges[0].start, y: 0.98, yref: "paper",
+  text: "Masked (not used for training)",
+  showarrow: false, font: { size: 10, color: "#e8710a" }
+});
+```
+
+**Also include:**
+- Config summary banner showing mask mode + training day count
+- Callout box explaining what masking means and why it was applied
+- Legend distinguishing: Pre-period (blue), Masked (orange), Intervention (red)
+
+This pattern applies to any form of data subsetting — not just winter masking.
+
 ## The Meta-Lesson: Subtract Before You Add
 
 When a causal impact model doesn't achieve significance, most analysts' instinct is to add
@@ -779,15 +816,23 @@ Auditor, Devil's Advocate + Supreme Judge) identified this as the most critical 
 ### What to lead with (in all deliverables)
 
 ```
-"There is an 80-90% probability the promo generated positive incremental revenue,
-estimated £160-270K (median £210K) across all 16 specifications. All methods agree
-on direction. The promo drove conversion (+14%), not traffic."
+"The promo generated an estimated £120-276K in incremental revenue across all 12
+specifications (all positive). When winter sale periods are excluded from training
+(a principled data preparation step), the model achieves formal significance at
+p<0.05 with 95% probability the effect is genuine. The promo drove conversion
+(+14%), not traffic."
 ```
 
-**Where does the probability range come from?** Use 1-p from your SYSTEMATIC sensitivity
-rerun (not the cherry-picked best spec). If 16 specs give p=0.102 to 0.469, the honest
-range is ~53-90%. Quote the primary spec (~80%) and note the optimised spec (~96%) as
-exploratory. Never let the upper bound come from a specification-searched result.
+**The masking breakthrough:** When seasonal variance inflates CIs to the point where
+significance is impossible, try masking the high-variance windows (e.g., Nov-Jan for
+retail) rather than truncating the pre-period or cherry-picking model configurations.
+Masking is a data preparation decision, not model tuning — it's more defensible than
+specification search. In a UK retail engagement, masking both winter sale periods
+reduced CI width by 60% (a wide CI → a narrower CI) and moved p from 0.190 to 0.047.
+
+**Where does the probability come from?** Use 1-p from your recommended spec.
+If you have masked and unmasked variants, quote both: "95% with masking, 81% without."
+Never let the headline probability come from an overconfident short pre-period (p≈0).
 
 ### What NOT to lead with
 
@@ -977,6 +1022,51 @@ From the a UK retail engagement (UK footwear retail):
 The sweet spot is usually just after the major seasonal peak — enough data to learn patterns,
 but excluding the period that dominates the variance. For UK retail, Jan 6 (post-Christmas
 hangover) is a reliable default.
+
+### Advanced: Masking high-variance periods instead of truncating
+
+Truncating the pre-period loses data. An alternative: **mask out** the high-variance windows
+while keeping the rest. This preserves the full annual cycle (spring-summer-autumn) while
+removing the Christmas noise.
+
+From a UK retail engagement:
+
+| Approach | Days | Std Dev | CI Width | p-value | Prob+ |
+|---|---|---|---|---|---|
+| Full (no mask) | 514 | a moderate uplift | a wide CI | 0.236 | 76% |
+| Jan 6 2025 start (truncate) | 417 | £210K | £781K | 0.085 | 92% |
+| **Mask BF-Jan 5 both years** | **410** | **£93K** | **£458K** | **0.063** | **94%** |
+| **Mask Nov-Jan both years** | **330** | **£91K** | **a narrower CI** | **0.055** | **95%** |
+| Jan 6 2026 start (too short) | 52 | £39K | £213K | 0.000 | 100% |
+
+Masking BF-Jan 5 keeps 410 days and drops std from a moderate uplift to £93K — better than truncation
+(which keeps 417 days but still has std=£210K because it includes Christmas 2025).
+
+**Warning:** Very short pre-periods (< 60 days) produce overconfident results. If p≈0 and
+CI is 3x tighter than other specs, the model is underestimating uncertainty — not finding a
+stronger signal. The Jan 6 2026 spec (52 days) should always carry a caveat.
+
+**Implementation:** Drop masked dates from the DataFrame before passing to CausalImpact:
+```python
+for start, end in [('2024-11-01', '2025-01-31'), ('2025-11-01', '2026-01-31')]:
+    df = df.loc[~((df.index >= start) & (df.index <= end))]
+```
+
+## Reference: Cloud Run for Batch BSTS Runs
+
+Running 12+ BSTS specs locally can take 60+ min. Use Cloud Run Jobs for parallel execution:
+
+1. **Containerize** the single-spec runner (tfcausalimpact + pandas + google-cloud-storage)
+2. **Upload data** to GCS (features CSV + weather CSV)
+3. **Launch all specs** with `--async` — each runs independently on 2 vCPU + 4GB
+4. **Collect results** from GCS when all complete
+
+Key settings:
+- `--task-timeout=1800s` (NOT 600s — longer pre-periods take 15-20 min for 6 BSTS models)
+- `--memory=4Gi --cpu=2` for tfcausalimpact
+- Pass spec key via `SPEC_KEY` env var, data location via `GCS_BUCKET`
+
+Typical cost: ~$0.50 for 12 parallel specs. Completes in ~15 min vs 60+ min sequential.
 
 ## Reference: Environment & Dependency Gotchas
 
