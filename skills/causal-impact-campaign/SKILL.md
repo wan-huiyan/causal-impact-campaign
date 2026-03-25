@@ -1,27 +1,69 @@
 ---
 name: causal-impact-campaign
+version: "1.4.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
   the user mentions "causal impact", "campaign uplift", "promo effect", "incrementality", "did the
-  campaign work", "revenue lift from campaign", or wants to attribute a metric change to a specific
+  campaign work", "revenue lift from campaign", "measure uplift", "what was the true effect",
+  "counterfactual analysis", "quasi-experiment", or wants to attribute a metric change to a specific
   intervention using time series data. Also trigger when working with GA4/BigQuery data and the user
   asks about measuring the effect of a price change, delivery promo, ad campaign, or any time-bounded
-  business action. This skill covers the full pipeline: data exploration, covariate engineering,
+  business action. Trigger on questions like "did the promotion actually increase revenue?",
+  "how much additional revenue did the campaign generate?", "is the revenue change from the campaign
+  or just seasonality?", "estimate the ROI of our marketing intervention", or "the p-value is 0.12 —
+  did it work?". This skill covers the full pipeline: data exploration, covariate engineering,
   dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing
   deliverables including interactive HTML explorers with Plotly.js. Even if the user only mentions
   one method, use this skill to ensure robustness through cross-method comparison.
+  NOT for: A/B test design with randomized control groups, multi-touch attribution modeling,
+  time series forecasting (Prophet/ARIMA), media mix modeling, or general analytics dashboards.
+input: |
+  - Daily time series data with a target metric (revenue, conversions, transactions)
+  - An intervention date (campaign start) and optional end date
+  - Covariate columns (sessions, organic_sessions, paid_sessions, etc.)
+  - Data source: typically GA4/BigQuery table or CSV/DataFrame
+output: |
+  - Causal impact estimate with credible intervals and p-values from two methods (tfcausalimpact + CausalPy)
+  - Validation results (placebo tests, pre-period fit, covariate sensitivity)
+  - Client-ready findings document (Markdown)
+  - Interactive HTML explorer with Plotly.js charts (optional)
+  - All analysis artifacts saved to a timestamped output directory
+error_handling: |
+  - If pre-period data is less than 3x the intervention period, warn the user and proceed with caveats
+  - If SNR < 0.2, set expectations early that statistical significance is unlikely
+  - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
+  - If methods disagree on direction, report both results honestly with interpretation guidance
+  - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
+idempotency: |
+  Re-running the analysis with the same data and parameters produces the same estimates
+  (within MCMC sampling variance). Set random_seed=42 for reproducibility.
+namespace: causal_impact
+composable_with:
+  - client-proposal-slide: Pass findings to create stakeholder-ready presentation
+  - frontend-design: Build custom interactive dashboards from analysis results
+  - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
 ---
 
 # Causal Impact Campaign Analysis
 
-This skill guides you through measuring the causal effect of a marketing campaign or business
-intervention on a target metric using Bayesian structural time series methods. It encodes
+This skill guides the analyst through measuring the causal effect of a marketing campaign or business
+intervention on a target metric using Bayesian structural time series methods. The skill encodes
 hard-won lessons from real client engagements — particularly around short-lived campaigns,
 retail seasonality, and honest statistical communication.
 
 The approach runs two independent Bayesian methods (tfcausalimpact and CausalPy) for robustness,
 includes a rigorous validation suite, and produces a client-ready findings document.
+
+The analysis is idempotent — safe to re-run with the same data and parameters (set random_seed=42
+for reproducibility across MCMC runs). Requires Python >= 3.9 with tfcausalimpact and CausalPy.
+Compatible with Python v3.9 through v3.12. Works with pandas v1.5+ and v2.x DataFrames.
+The causal_impact namespace keeps all output artifacts scoped to a timestamped directory.
+
+On error: if tfcausalimpact fails to converge, fall back to CausalPy alone and note the limitation
+in the findings document. When CausalPy fails on macOS with a multiprocessing RuntimeError, apply
+the cores=1 fix documented in the environment gotchas section. If both methods fail, report the
+failure clearly and suggest checking data quality and pre-period length.
 
 ## When This Applies
 
@@ -89,7 +131,7 @@ print(f"Date range: {df['date'].min()} to {df['date'].max()}")
 
 ### The "traffic vs conversion" diagnostic
 
-This is critical for covariate safety. Compare the intervention period to the week before:
+The traffic-vs-conversion diagnostic is critical for covariate safety. Compare the intervention period to the week before:
 
 ```python
 # If sessions barely changed but revenue jumped → promo lifted conversion/AOV
@@ -102,7 +144,7 @@ print(f"Promo:    revenue={promo['revenue'].mean():.0f}, sessions={promo['sessio
 
 ## Step 3: Engineer Covariates
 
-This is where most of the analytical value is added. Better covariates = tighter counterfactual
+Covariate engineering is where most of the analytical value is added. Better covariates = tighter counterfactual
 = narrower credible intervals = better chance of detecting the effect.
 
 ### The Covariate Safety Rule
@@ -116,7 +158,7 @@ Safe controls for most campaign types:
 - Weather (if available)
 
 > **Always test with and without suspect covariates.** If removing a covariate increases the
-> effect estimate substantially (>20%), it's likely absorbing the causal signal. In the The Retailer
+> effect estimate substantially (>20%), it's likely absorbing the causal signal. In a retail
 > case, removing `paid_sessions` increased the effect by a meaningful amount (+36%) and improved p-value from
 > 0.142 to 0.060 — achieving BSTS significance for the first time.
 
@@ -142,7 +184,7 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 > without built-in seasonality.
 
 #### 3. Holiday intensity (not binary flags)
-This is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
+Holiday intensity encoding is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
 sale days equally, but Black Friday (a peak sale day) is 5x a regular sale day (a normal sale day). The model
 sees a massive unexplained residual, which inflates variance estimates and widens ALL
 credible intervals — including for your promo period.
@@ -451,7 +493,7 @@ After the primary analysis, run these extensions to deepen the insight:
 Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
 **which lever the campaign pulled** — was it conversion, basket size, or traffic?
 
-In the The Retailer case: conversion rate showed the strongest signal (+14.3%, p=0.167, 83% prob positive)
+In the retail case study: conversion rate showed the strongest signal (+14.3%, p=0.167, 83% prob positive)
 while AOV barely moved (+0.7%). This told us the delivery promo removed a conversion barrier — people
 already browsing decided to buy because delivery was free. They didn't spend more per order.
 
@@ -479,7 +521,7 @@ persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
 - Ratio 10-50%: Partial persistence — mention as additional upside
 - Ratio < 10%: Effect dissipated — report promo-period only
 
-In the The Retailer case: 66% persistence over 2 weeks, making the total impact considerably larger than
+In the retail case study: 66% persistence over 2 weeks, making the total impact considerably larger than
 the headline promo-period figure.
 
 ### Weather Covariate
@@ -692,7 +734,7 @@ static deliverables.
 | Slide deck | Client meeting | Live presentation, screen sharing |
 | Scrolling report | Client async | Email attachment, static self-service reading |
 | Jupyter notebook | Internal DS team | Verification, iteration, collaboration |
-| Markdown findings | Internal (Elena-style) | Quick sharing, PR review, documentation |
+| Markdown findings | Internal (analyst-style) | Quick sharing, PR review, documentation |
 
 ## The Meta-Lesson: Subtract Before You Add
 
@@ -707,11 +749,11 @@ more covariates. In practice, the biggest improvements come from **removing** th
 | Add better covariates (multi-modal holiday intensity) | Addition | -11% CI width |
 | Add exogenous signals (weather) | Addition | -3% CI width |
 
-In the The Retailer engagement, this took p from 0.223 to 0.039 — all from the same data, same model
+In the a UK retail engagement, this took p from 0.223 to 0.039 — all from the same data, same model
 architecture. Three of five improvement steps were subtractions.
 
 **Critical caveat: specification search.** If you test N specifications and report the one with
-the lowest p-value, the result is exploratory, not confirmatory. In the The Retailer engagement, 48
+the lowest p-value, the result is exploratory, not confirmatory. In the a UK retail engagement, 48
 experiments were conducted. The best spec (p<0.05) was an outlier — all 6 sensitivity specs
 had p=0.18-0.24. A multi-agent review panel flagged this as the central methodological concern.
 The honest framing is: "The primary specification produces p=0.21. An optimised specification
@@ -737,10 +779,15 @@ Auditor, Devil's Advocate + Supreme Judge) identified this as the most critical 
 ### What to lead with (in all deliverables)
 
 ```
-"There is an 80-96% probability the promo generated positive incremental revenue,
-estimated £190-250K across all specifications. All methods agree on direction.
-The promo drove conversion (+14%), not traffic."
+"There is an 80-90% probability the promo generated positive incremental revenue,
+estimated £160-270K (median £210K) across all 16 specifications. All methods agree
+on direction. The promo drove conversion (+14%), not traffic."
 ```
+
+**Where does the probability range come from?** Use 1-p from your SYSTEMATIC sensitivity
+rerun (not the cherry-picked best spec). If 16 specs give p=0.102 to 0.469, the honest
+range is ~53-90%. Quote the primary spec (~80%) and note the optimised spec (~96%) as
+exploratory. Never let the upper bound come from a specification-searched result.
 
 ### What NOT to lead with
 
@@ -786,7 +833,7 @@ A client who reloads the page and sees different numbers will question everythin
 3b. **Claiming significance from specification search** — if you tested N specs and only the
    "best" achieved p < 0.05, the result is exploratory. Bonferroni correction: multiply p by N.
    Lead with the Bayesian posterior across all specs instead. This was the #1 finding from
-   adversarial review of the The Retailer deliverables.
+   adversarial review of the the client deliverables.
 
 4. **Too-long pre-periods with structural breaks** — if predictions get worse with more data,
    shorten the pre-period. Find the sweet spot.
@@ -802,14 +849,81 @@ A client who reloads the page and sees different numbers will question everythin
 
 8. **Including high-variance seasonal periods in the pre-period** — For retail clients, the
    Christmas/Black Friday period can inflate credible intervals by 30%+. Test excluding it:
-   start the pre-period after Jan 6 (post-Christmas hangover). In the The Retailer case, this reduced
+   start the pre-period after Jan 6 (post-Christmas hangover). In the retail case study, this reduced
    CI width from a wide CI to a narrower CI (-27%) and improved p-value from 0.215 to 0.163 while the
    effect estimate remained stable (a moderate uplift vs a moderate uplift). Always run a pre-period sensitivity test
    with multiple start dates to find the optimal noise/data tradeoff.
 
+9. **Fake p-values in multi-method pipelines** — When wrapping multiple methods (BSTS, CausalPy,
+   RDiT, conformal) into a unified output dataclass, NEVER fill in placeholder p-values for
+   methods that don't produce them. Common traps:
+   - CausalPy linear regression: tempting to return `p=0.25` as a "neutral" constant
+   - Conformal CIs: tempting to return `p=0.5 if CI_contains_zero else 0.05` (a binary hack)
+   These appear alongside real BSTS p-values in comparison tables and mislead users. Return
+   `p=None` and display "N/A" in the UI. If a method produces a Bayesian posterior, label it
+   explicitly (e.g., "P(positive): 87%") rather than converting to a fake frequentist p-value.
+
+10. **Probability range inflation via 1-p conversion** — When converting specification-searched
+    p-values to "probability of positive effect" (1-p), the bias carries over. If you tested 48
+    specs and the best gave p<0.05, quoting "96% probability" (1-0.039) smuggles the cherry-picked
+    result into a Bayesian-sounding claim. Always derive the probability range from a SYSTEMATIC
+    sensitivity rerun. In the retail case study, 16 specs gave p=0.102-0.469, mapping to 53-90% probability.
+    The honest range is ~75-90%, not 80-96%.
+
+11. **Internal reference docs drifting from deliverable framing** — After a review panel prompts
+    reframing (e.g., from "p<0.05, significant" to "80-90% probability, exploratory"), update the
+    internal reference document (ANALYSIS_FINDINGS.md exec summary, narrative sections) in the SAME
+    commit as the deliverables. Auditors and new team members read the internal doc first. If it still
+    leads with the old framing, the reframing looks cosmetic.
+
+## Multi-Method Pipeline Gotchas (v1.4.0)
+
+When building a webapp or unified pipeline that runs multiple CI methods:
+
+### Unified output type
+
+```python
+@dataclass
+class CiOut:
+    abs_eff: float
+    abs_low: float
+    abs_up: float
+    rel_eff: float
+    p: float | None  # None for methods without p-values
+```
+
+Methods that produce real p-values: `tfcausalimpact` (BSTS), `run_rdit` (bootstrap).
+Methods that do NOT: `CausalPy` (Bayesian posterior, not frequentist), conformal CIs
+(distribution-free intervals, no p-value concept).
+
+### RDiT bandwidth sensitivity
+
+Always test RDiT at multiple bandwidths (e.g., 7, 14, 21, 28 days). A result that is
+"significant" at only one bandwidth is fragile. In the retail case study:
+
+| Bandwidth | Cumulative Effect | 95% CI | Significant? |
+|-----------|------------------|--------|-------------|
+| 7 days | 125K | [-80K, 281K] | No |
+| 14 days | 162K | [34K, 289K] | Yes |
+| 21 days | 248K | [120K, 372K] | Yes |
+| 28 days | 266K | [131K, 371K] | Yes |
+
+3/4 bandwidths significant with monotonically increasing effect and tightening CIs =
+robust signal. If only the narrowest bandwidth passes, the result is fragile.
+
+### Sensitivity spec generation
+
+When auto-generating specs for sensitivity testing, categorise covariates by type:
+- **Session covariates:** organic_sessions, paid_sessions
+- **Calendar flags:** holiday_flag, payday_window_flag, is_weekend, kcp_period_flag
+- **Seasonality:** sin_dow, cos_dow, fourier terms, xmas_intensity
+Then generate: minimal (1 session covariate), calendar-only, seasonality-only,
+calendar+seasonality, full, without-paid, kitchen-sink. Test across 2+ pre-period
+start dates. Report the FULL range and median, not just the best result.
+
 ## Reference: Covariate Correlation Benchmarks
 
-From the The Retailer engagement (UK footwear retail, daily revenue):
+From the a UK retail engagement (UK footwear retail, daily revenue):
 
 | Covariate | r with Revenue | Notes |
 |---|---|---|
@@ -828,7 +942,7 @@ These are benchmarks, not universals — always compute correlations for the spe
 
 ## Reference: Method Selection for Short Campaigns
 
-From the The Retailer engagement — key lessons about which methods work for campaigns under 1 week:
+From the a UK retail engagement — key lessons about which methods work for campaigns under 1 week:
 
 | Method | Result | Key Insight |
 |---|---|---|
@@ -843,7 +957,7 @@ campaigns the global variance dominates. RDiT focuses only on the local disconti
 sidestepping the noise problem entirely. Use BSTS as a supporting method for the full counterfactual
 decomposition, and RDiT for the significance claim.
 
-**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in the The Retailer
+**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in a retail
 case — a dramatic improvement. Use the pre-period residual quantile approach: `np.quantile(np.abs(residuals), 0.95)`.
 
 **Fourier seasonality (k=1..4):** Did NOT help with ~17 months of data (+0.9% CI width). Requires 2+ full
@@ -851,7 +965,7 @@ annual cycles to learn meaningful patterns. Don't add Fourier terms unless the p
 
 ## Reference: Pre-period Start Date Sensitivity
 
-From the The Retailer engagement (UK footwear retail):
+From the a UK retail engagement (UK footwear retail):
 
 | Start Date | Description | Days | CI Width Impact | p-value |
 |---|---|---|---|---|

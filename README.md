@@ -251,7 +251,7 @@ Built from real causal inference methodology applied to public policy analysis. 
 
 | Version | Changes |
 |---------|---------|
-| 1.4.0 | Enrich trigger description, add eval suite, add composability metadata (schliff score: 61.0 → 75.5) |
+| 1.4.0 | Multi-method pipeline gotchas (fake p-values, probability range inflation, internal doc drift), RDiT bandwidth sensitivity table, updated Claim Framing Guide with systematic rerun derivation, eval suite + composability (schliff 61→75.5) |
 | 1.3.0 | Claim Framing Guide from adversarial review — specification search warnings, scorecard consistency rules, Bayesian posterior framing |
 | 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |
 | 1.1.0 | CausalPy model selection guide (5 classes), quadratic time trend, internal notebook |
