@@ -1,27 +1,74 @@
 ---
 name: causal-impact-campaign
+version: "1.3.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
   the user mentions "causal impact", "campaign uplift", "promo effect", "incrementality", "did the
-  campaign work", "revenue lift from campaign", or wants to attribute a metric change to a specific
+  campaign work", "revenue lift from campaign", "measure uplift", "what was the true effect",
+  "counterfactual analysis", "quasi-experiment", or wants to attribute a metric change to a specific
   intervention using time series data. Also trigger when working with GA4/BigQuery data and the user
-  asks about measuring the effect of a price change, delivery promo, ad campaign, or any time-bounded
-  business action. This skill covers the full pipeline: data exploration, covariate engineering,
-  dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing
-  deliverables including interactive HTML explorers with Plotly.js. Even if the user only mentions
-  one method, use this skill to ensure robustness through cross-method comparison.
+  asks about measuring the effect of a price change, delivery promo, delivery promotion, ad campaign,
+  or any time-bounded business action. Trigger on questions like "did the promotion actually increase
+  revenue?", "how much additional revenue did the campaign generate?", "is the revenue change from the
+  campaign or just seasonality?", "estimate the ROI of our marketing intervention", "the p-value is
+  0.12 — did it work?", "can we still measure the impact?", "should we use synthetic control?",
+  "geo-targeted campaign", "two promotions running at the same time", "separate their effects",
+  "weekly aggregated data", "measure campaign effect", "changing our delivery policy affected order
+  volume", "attribute the conversion spike to the price reduction", "cross-validate causal results",
+  "influencer campaign ROI". This skill covers the full pipeline: data exploration, covariate
+  engineering, dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and
+  client-facing deliverables including interactive HTML explorers with Plotly.js. Even if the user
+  only mentions one method, use this skill to ensure robustness through cross-method comparison.
+  NOT for: A/B test design with randomized control groups, multi-touch attribution modeling,
+  time series forecasting (Prophet/ARIMA), media mix modeling, or general analytics dashboards.
+input: |
+  - Daily time series data with a target metric (revenue, conversions, transactions)
+  - An intervention date (campaign start) and optional end date
+  - Covariate columns (sessions, organic_sessions, paid_sessions, etc.)
+  - Data source: typically GA4/BigQuery table or CSV/DataFrame
+output: |
+  - Causal impact estimate with credible intervals and p-values from two methods (tfcausalimpact + CausalPy)
+  - Validation results (placebo tests, pre-period fit, covariate sensitivity)
+  - Client-ready findings document (Markdown)
+  - Interactive HTML explorer with Plotly.js charts (optional)
+  - All analysis artifacts saved to a timestamped output directory
+error_handling: |
+  - If pre-period data is less than 3x the intervention period, warn the user and proceed with caveats
+  - If SNR < 0.2, set expectations early that statistical significance is unlikely
+  - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
+  - If methods disagree on direction, report both results honestly with interpretation guidance
+  - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
+idempotency: |
+  Re-running the analysis with the same data and parameters produces the same estimates
+  (within MCMC sampling variance). Set random_seed=42 for reproducibility.
+namespace: causal_impact
+consumes_from:
+  - gcp-pipeline-cost-analysis: Daily time series data from BigQuery
+  - data-extraction: Raw GA4/analytics data export
+hands_off_to:
+  - client-proposal-slide: Pass findings document and key metrics
+  - frontend-design: Pass data structure and section layout for interactive HTML
+output_contract: |
+  - findings.md: Markdown findings document with executive summary, results, validation, recommendations
+  - counterfactual_data.csv: Daily observed vs predicted with CI bounds
+  - sensitivity_summary.csv: Per-specification effect estimates, p-values, CIs
+  - interactive_explorer.html: Self-contained Plotly.js explorer (optional)
+composable_with:
+  - client-proposal-slide: Pass findings to create stakeholder-ready presentation
+  - frontend-design: Build custom interactive dashboards from analysis results
+  - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
 ---
 
 # Causal Impact Campaign Analysis
 
-This skill guides you through measuring the causal effect of a marketing campaign or business
-intervention on a target metric using Bayesian structural time series methods. It encodes
-hard-won lessons from real client engagements — particularly around short-lived campaigns,
-retail seasonality, and honest statistical communication.
+Measures the causal effect of a marketing campaign or business intervention on a target metric
+using dual Bayesian methods (tfcausalimpact + CausalPy). Encodes lessons from real client
+engagements around short-lived campaigns, retail seasonality, and honest statistical communication.
 
-The approach runs two independent Bayesian methods (tfcausalimpact and CausalPy) for robustness,
-includes a rigorous validation suite, and produces a client-ready findings document.
+**Requirements:** Compatible with Python v3.9 through v3.12, pandas v1.5+ and v2.x.
+Set `random_seed=42` for reproducibility. The analysis is idempotent -- safe to re-run with
+the same data and parameters. All output artifacts scoped to a timestamped `causal_impact` directory.
 
 ## When This Applies
 
@@ -87,13 +134,17 @@ print(f"Date range: {df['date'].min()} to {df['date'].max()}")
 4. **Around the intervention** — what changed? Traffic? Conversion? AOV?
 5. **Correlation matrix** — which covariates correlate with the target?
 
-### The "traffic vs conversion" diagnostic
+### Traffic vs conversion diagnostic
 
-This is critical for covariate safety. Compare the intervention period to the week before:
+Compare intervention period to the prior week to determine covariate safety:
+
+| Sessions changed? | Revenue changed? | Interpretation | Sessions as covariate? |
+|---|---|---|---|
+| No | Yes | Promo lifted conversion/AOV | SAFE |
+| Yes | Yes | Promo drove traffic + conversion | CAUTION (absorbs signal) |
+| Yes | No | Traffic spike, no conversion lift | SAFE but promo may have failed |
 
 ```python
-# If sessions barely changed but revenue jumped → promo lifted conversion/AOV
-# This means sessions-based covariates are SAFE controls
 promo = df[(df['date'] >= INTERVENTION_START) & (df['date'] <= INTERVENTION_END)]
 pre_week = df[(df['date'] >= INTERVENTION_START - pd.Timedelta(days=7)) & (df['date'] < INTERVENTION_START)]
 print(f"Pre-week: revenue={pre_week['revenue'].mean():.0f}, sessions={pre_week['sessions'].mean():.0f}")
@@ -102,23 +153,19 @@ print(f"Promo:    revenue={promo['revenue'].mean():.0f}, sessions={promo['sessio
 
 ## Step 3: Engineer Covariates
 
-This is where most of the analytical value is added. Better covariates = tighter counterfactual
-= narrower credible intervals = better chance of detecting the effect.
+Better covariates = tighter counterfactual = narrower credible intervals = better detection.
 
 ### The Covariate Safety Rule
 
 **A covariate must NOT be affected by the intervention.** If the campaign drove paid traffic,
-`paid_sessions` absorbs the effect and your estimate will be biased toward zero.
+`paid_sessions` absorbs the effect and biases the estimate toward zero.
 
-Safe controls for most campaign types:
-- `organic_sessions` — organic demand is rarely affected by a delivery/price promo
-- Calendar variables — day-of-week, holidays, payday cycles
-- Weather (if available)
-
-> **Always test with and without suspect covariates.** If removing a covariate increases the
-> effect estimate substantially (>20%), it's likely absorbing the causal signal. In the Schuh
-> case, removing `paid_sessions` increased the effect by £64K (+36%) and improved p-value from
-> 0.142 to 0.060 — achieving BSTS significance for the first time.
+| Covariate type | Safety | Examples |
+|---|---|---|
+| Organic demand | Usually SAFE | `organic_sessions` |
+| Calendar | Always SAFE | day-of-week, holidays, payday cycles |
+| Exogenous | Always SAFE | weather (temperature, precipitation) |
+| Paid traffic | TEST BOTH | `paid_sessions` -- remove if effect estimate increases >20% |
 
 ### Covariate Engineering Recipes
 
@@ -142,12 +189,8 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 > without built-in seasonality.
 
 #### 3. Holiday intensity (not binary flags)
-This is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
-sale days equally, but Black Friday (£2.5M) is 5x a regular sale day (£500K). The model
-sees a massive unexplained residual, which inflates variance estimates and widens ALL
-credible intervals — including for your promo period.
-
-Use a continuous Gaussian bell curve peaking at Black Friday (~27 days before Christmas):
+Binary flags treat all sale days equally, but Black Friday (5x normal revenue) creates massive
+unexplained residuals that inflate ALL credible intervals. Use continuous intensity curves:
 
 ```python
 def christmas_proximity(date_series):
@@ -176,8 +219,7 @@ def christmas_proximity(date_series):
     return result
 ```
 
-This variable typically achieves r=0.828 with revenue for retail clients (vs r=0.632 for a
-single Gaussian and r≈0.02 for a binary `winter_sale_flag`).
+Typical correlations: multi-modal r=0.828 vs single Gaussian r=0.632 vs binary flag r=0.02.
 
 #### 4. Interaction terms
 Combine factors that amplify each other:
@@ -189,8 +231,7 @@ df['payday_x_weekend'] = df['payday_window_flag'] * df['is_weekend']
 ```python
 df['paid_share'] = df['paid_sessions'] / (df['paid_sessions'] + df['organic_sessions'])
 ```
-Low standalone correlation (~0.14) but can be useful in combination. A negative coefficient
-often means organic visitors convert better (higher revenue per organic session).
+Low standalone r (~0.14) but useful in combination. Negative coefficient implies organic converts better.
 
 ### Recommended covariate audit
 
@@ -233,11 +274,9 @@ a `SKIP` recommendation. Test `CAUTION` covariates by running the model with and
 
 ## Step 4: Run Multi-Method Analysis
 
-No single method is perfect for causal inference from observational time series. Each makes
-different assumptions and has different blind spots. Running multiple methods and checking
-whether they agree is far more convincing than any single p-value.
+Run multiple methods -- agreement across methods is far more convincing than any single p-value.
 
-### Why each method and when to use it
+### Method selection
 
 | Method | What it does | When to use | Key limitation |
 |---|---|---|---|
@@ -261,14 +300,10 @@ Campaign duration >= 14 days?
 failed is as valuable as positive results. Include in the findings doc's "What Worked and
 What Didn't" section.
 
-### Important: Dependency Conflict
+### Dependency Conflict (critical)
 
-tfcausalimpact and CausalPy have **incompatible numpy requirements**:
-- tfcausalimpact: `numpy<2`, `pandas<=2.2`
-- CausalPy: `numpy>=2`, `pandas>=3.0`
-
-**You must run them in separate Python scripts.** Run tfcausalimpact first (with numpy<2),
-then upgrade numpy and run CausalPy.
+tfcausalimpact (`numpy<2`) and CausalPy (`numpy>=2`) cannot coexist. Run in separate scripts:
+tfcausalimpact first, then `pip install "numpy>=2"`, then CausalPy.
 
 ### Method 1: tfcausalimpact
 
@@ -331,13 +366,9 @@ CausalPy offers several model classes. Here's what we learned from testing them:
 | `BayesianBasisExpansionTimeSeries` | Prophet-like (Fourier + changepoints) | Requires `pymc-marketing` dependency. Params: `n_order=3`, `n_changepoints_trend=10` |
 | `StateSpaceTimeSeries` | Closest to tfcausalimpact's BSTS | Full state-space model with level/trend/seasonal. Params: `level_order=2`, `seasonal_length=7` for daily data. Slowest but most principled |
 
-**Practical recommendation:** Start with `LinearRegression` (fast, good enough for most cases).
-If the pre-period R² is below 0.65, try `StateSpaceTimeSeries` for better time dynamics.
-`WeightedSumFitter` is only appropriate if you have proper donor units (comparable untreated
-sites/regions), not for single-unit ITS.
-
-**ScikitLearnAdaptor note:** The API changed in CausalPy 0.8 — `ScikitLearnAdaptor()` takes
-no arguments. Check the current docs if you need sklearn models.
+Start with `LinearRegression`. If pre-period R² < 0.65, try `StateSpaceTimeSeries`.
+`WeightedSumFitter` requires donor units (untreated sites/regions) -- not for single-unit ITS.
+CausalPy 0.8+: `ScikitLearnAdaptor()` takes no arguments.
 
 ### Sensitivity analysis
 
@@ -360,8 +391,7 @@ conventional thresholds.
 
 ### Rolling backtests
 
-Slide a fake intervention window across the pre-period. At each position, fit the model on
-everything before and predict the window. Compare predictions to actuals:
+Slide a fake intervention window across the pre-period. Fit on everything before, predict the window:
 
 ```python
 HORIZON = promo_days  # same length as real intervention
@@ -383,8 +413,7 @@ Compare the real intervention effect to the distribution of placebo effects:
 placebo_rank = (placebo_effects < real_effect).mean()  # if effect is positive
 ```
 
-If the real effect ranks above the 90th percentile of placebos, it's genuinely unusual.
-If it sits in the middle (50-70th percentile), the model can't distinguish it from noise.
+Real effect > 90th percentile of placebos = genuinely unusual. 50-70th = indistinguishable from noise.
 
 ### Scorecard
 
@@ -399,25 +428,17 @@ If it sits in the middle (50-70th percentile), the model can't distinguish it fr
 Passing all 5 = strong result. Passing 3+ with consistent direction = defensible.
 Failing most = honest finding — report it as such.
 
-### Watch for problematic backtest windows
-
-Christmas/BF windows often show extreme WAPE (0% or 40%+) and massive placebo effects.
-These inflate the placebo distribution, making the real effect look less unusual. Note this
-in the findings — it's a feature of high-variance retail data, not a model failure.
+**Watch for Christmas/BF backtest windows** -- extreme WAPE and massive placebo effects inflate
+the distribution. Note in findings; this is a feature of high-variance retail data, not model failure.
 
 ## Step 6: Interpret Honestly
 
-### The pre-period length question
+### Pre-period length
 
-More data is NOT always better. Longer pre-periods can hurt if:
-- The website/tracking changed (structural break)
-- The sessions→revenue relationship shifted (non-stationarity)
+More data is NOT always better. Longer pre-periods hurt when:
+- Tracking changed (structural break) or sessions-revenue relationship shifted
 - COVID/post-COVID regime changes apply
-- The client can't provide accurate campaign flags further back
-
-The binding constraint is often **campaign calendar completeness** — the client may not have
-reliable records of which promotions ran 2+ years ago. Flags like `winter_sale_flag` are only
-useful if accurate.
+- Campaign calendar is incomplete (flags like `winter_sale_flag` are useless if inaccurate)
 
 ### Framing for clients
 
@@ -448,23 +469,17 @@ After the primary analysis, run these extensions to deepen the insight:
 
 ### Effect Decomposition
 
-Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
-**which lever the campaign pulled** — was it conversion, basket size, or traffic?
+Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` to reveal **which lever
+the campaign pulled**. This is often the most valuable insight -- it informs future offer design.
 
-In the Schuh case: conversion rate showed the strongest signal (+14.3%, p=0.167, 83% prob positive)
-while AOV barely moved (+0.7%). This told us the delivery promo removed a conversion barrier — people
-already browsing decided to buy because delivery was free. They didn't spend more per order.
-
-This is often the most valuable insight for the client — it informs future offer design.
+Example: Schuh delivery promo lifted conversion rate (+14.3%) while AOV barely moved (+0.7%),
+showing the promo removed a conversion barrier, not a spending barrier.
 
 ### Channel Split
 
-Run CausalImpact on `paid_revenue` and `organic_revenue` separately to see if the campaign
-affected all channels or just one. Use `organic_sessions` as control for both (don't use
-`paid_sessions` as control for paid revenue — endogeneity risk).
-
-If both channels lift proportionally, it's a site-wide conversion effect. If only paid lifts,
-the campaign may be driving traffic rather than conversion.
+Run CausalImpact on `paid_revenue` and `organic_revenue` separately. Use `organic_sessions` as
+control for both (never `paid_sessions` for paid revenue -- endogeneity). Both lift = site-wide
+conversion effect. Only paid lifts = traffic-driving campaign.
 
 ### Post-Promo Persistence
 
@@ -484,30 +499,20 @@ the headline promo-period figure.
 
 ### Weather Covariate
 
-For retail/ecommerce clients, add daily temperature and precipitation as covariates.
-Source: [Open-Meteo API](https://open-meteo.com/) — free, no API key needed.
+Add daily temperature and precipitation from [Open-Meteo API](https://open-meteo.com/) (free, no key).
+Low standalone r (-0.05 to +0.03) but tightens CIs by 2-5% as an orthogonal exogenous signal.
 
 ```python
-# Fetch via curl (bypass corporate SSL proxies) or requests
 import requests
 resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params={
-    "latitude": 51.5074, "longitude": -0.1278,  # London
+    "latitude": 51.5074, "longitude": -0.1278,
     "start_date": "2024-10-01", "end_date": "2026-03-15",
     "daily": "temperature_2m_mean,precipitation_sum",
     "timezone": "Europe/London",
 })
 ```
 
-Weather typically has low standalone correlation with revenue (r ≈ -0.05 to +0.03) but provides
-an orthogonal exogenous signal that can tighten credible intervals by 2-5%. Worth including when
-available, but not transformative.
-
-**Why weather matters for retail:** Rain/cold drives online purchasing (people stay home). For
-footwear specifically, seasonal patterns (boots in autumn, sandals in spring) correlate with
-temperature.
-
-**SSL note:** Corporate proxies may block the Open-Meteo API. Use `curl -sk` to bypass, or
-`requests.get(..., verify=False)`.
+**SSL note:** Corporate proxies may block this. Use `curl -sk` or `verify=False`.
 
 ## Step 7: Document
 
@@ -560,26 +565,13 @@ Produce a markdown findings document with this structure:
 If the work is client-facing, produce polished visual deliverables in addition to the markdown
 findings doc. Two formats work well:
 
-### Slide Deck (recommended for presentations)
-An interactive HTML slide deck with keyboard/touch navigation. 10 slides covering:
-title, key metrics, counterfactual chart, mechanism (traffic vs conversion), decomposition,
-channel split, persistence, robustness, transparency/scorecard, recommendations.
+### Format options
 
-Use the **`frontend-design` skill** for distinctive, production-grade HTML. Specify the
-data points, sections, and audience (non-technical marketing team). Key design notes:
-- Use fade+scale transitions (not directional translateX — causes backwards navigation bugs)
-- Include keyboard (arrow keys, spacebar) and touch swipe navigation
-- Dark title slide, light content slides
-- Embed charts as SVG (no external image dependencies)
-
-### Scrolling Report (recommended for async sharing)
-A single-page HTML report with scroll-triggered animations. Same content as the deck but
-in a continuous format. Better for emailing to stakeholders who will read at their own pace.
-
-### Jupyter Notebook (for internal DS team)
-A reproducible notebook with full code, diagnostics, and commentary. Separate audience from
-the client deliverables — include model diagnostics, correlation heatmaps, and validation
-details that would overwhelm a non-technical reader.
+| Format | Audience | Notes |
+|---|---|---|
+| **Slide Deck** | Client meetings | 10 HTML slides, fade+scale transitions, SVG charts. Use `frontend-design` skill. |
+| **Scrolling Report** | Async stakeholders | Single-page HTML, scroll-triggered animations |
+| **Jupyter Notebook** | Internal DS team | Full code, diagnostics, correlation heatmaps |
 
 ### Interactive Explorer (recommended for client self-service)
 
@@ -588,73 +580,17 @@ as JSON. The client opens it in their browser — no server, no install, works o
 load. This is the **highest-impact deliverable** because it lets the client explore robustness
 themselves rather than trusting a static summary.
 
-**Architecture:** One HTML file containing:
-- CSS design system (reuse from slide deck/report)
-- Plotly.js loaded via CDN
-- All scenario data embedded as a `const DATA = {...}` JSON object in a `<script>` tag
-- JavaScript event handlers for dropdowns, tabs, and card clicks
+**Architecture:** Single HTML file with CSS, Plotly.js (CDN), embedded `const DATA = {...}` JSON,
+and JS event handlers. Five sections: Hero+Spec Selector, Counterfactual Chart, Method Comparison,
+Effect Decomposition, Channel & Persistence. Plus a validation scorecard.
 
-**5 interactive sections:**
+**Data structure:** Embed `specs` (per model specification: effect, pval, CIs), `methods` (per
+analysis method: effect, CIs, description), and `timeseries` (daily dates, observed, predicted,
+CI bounds). Extract from `ci.inferences` during Step 4; fallback: synthetic counterfactual.
 
-| Section | Interaction | What updates |
-|---|---|---|
-| Hero + Spec Selector | Dropdown to select model specification | Headline £, %, p-value, confidence badge, all metric cards |
-| Counterfactual Chart | Plotly.js zoom/hover/pan + CI band toggle | Interactive time series (observed vs predicted) |
-| Method Comparison | Clickable method cards | Horizontal bar chart with CI error bars, method description |
-| Effect Decomposition | Metric cards with animated probability bars | CR, Transactions, Revenue, AOV breakdown |
-| Channel & Persistence | Tabbed view (persistence / paid vs organic) | Bar charts + summary metrics per tab |
-
-Plus a **validation scorecard** table with pass/borderline/fail indicators.
-
-**Data to pre-compute and embed as JSON:**
-
-```javascript
-const DATA = {
-  specs: {
-    // One entry per model specification (typically 6-8)
-    best: {
-      name: "Recommended spec name",
-      effect: 297000,       // cumulative £
-      daily: 74250,         // daily avg £
-      relative: 22,         // relative % lift
-      pval: 0.039,
-      probPos: 96.1,
-      ciLow: -298000,
-      ciHigh: 762000,
-      sig: true,            // p < 0.05?
-      sigLabel: "p < 0.05",
-      preStart: "Jan 6 2025",
-      note: "Human-readable description of this spec"
-    },
-    // ... repeat for each sensitivity spec
-  },
-  methods: {
-    // One entry per analysis method
-    bsts:      { name: "...", effect: N, ciLow: N, ciHigh: N, desc: "...", metric: "...", pval: "..." },
-    rdit:      { ... },
-    causalpy:  { ... },
-    conformal: { ... }
-  },
-  timeseries: {
-    // Daily arrays for the counterfactual chart
-    dates: ["2026-02-13", ...],
-    observed: [210000, ...],
-    predicted: [208000, ...],
-    ciUpper: [340000, ...],
-    ciLower: [80000, ...]
-  }
-};
-```
-
-**Key implementation notes:**
-- **Data size:** Daily granularity × ~30 days around intervention × a few scenarios = tiny (<100KB JSON).
-  The Plotly.js CDN (~3.5MB) is the main dependency — cached after first load.
-- **Counterfactual data source options:**
-  1. **Best:** Extract `ci.inferences` from the tfcausalimpact run (observed, preds, preds_lower, preds_upper)
-     and save as CSV/JSON during the analysis step.
-  2. **Fallback:** Generate synthetic counterfactual = observed − (daily_effect estimate) for the promo period.
-     Less precise but sufficient for interactive exploration.
-- **Spec selector:** Updates all metrics simultaneously with a fade animation — gives the client an intuitive
+**Key notes:**
+- Data is tiny (<100KB JSON). Plotly.js CDN (~3.5MB) cached after first load.
+- Spec selector updates all metrics simultaneously with fade animation -- gives the client an intuitive
   sense of how stable the result is across specifications.
 - **Method comparison chart:** Horizontal bar chart with error bars. A red dashed zero-effect line makes it
   visually obvious whether each method's CI excludes zero.
@@ -696,8 +632,7 @@ static deliverables.
 
 ## The Meta-Lesson: Subtract Before You Add
 
-When a causal impact model doesn't achieve significance, most analysts' instinct is to add
-more covariates. In practice, the biggest improvements come from **removing** things:
+When p > 0.10, the biggest improvements come from **removing** things, not adding:
 
 | Action | Type | Typical impact |
 |---|---|---|
@@ -707,30 +642,17 @@ more covariates. In practice, the biggest improvements come from **removing** th
 | Add better covariates (multi-modal holiday intensity) | Addition | -11% CI width |
 | Add exogenous signals (weather) | Addition | -3% CI width |
 
-In the Schuh engagement, this took p from 0.223 to 0.039 — all from the same data, same model
-architecture. Three of five improvement steps were subtractions.
-
-**Critical caveat: specification search.** If you test N specifications and report the one with
-the lowest p-value, the result is exploratory, not confirmatory. In the Schuh engagement, 48
-experiments were conducted. The best spec (p=0.039) was an outlier — all 6 sensitivity specs
-had p=0.18-0.24. A multi-agent review panel flagged this as the central methodological concern.
-The honest framing is: "The primary specification produces p=0.21. An optimised specification
-achieves p=0.039, but this should be treated as exploratory." See the Claim Framing Guide below.
-
-**Practical workflow:** When p > 0.10, try these in order:
-1. Shorten the pre-period (exclude high-variance events)
-2. Run the combined covariate audit — remove anything that changed >10% during intervention
+**Practical workflow when p > 0.10:**
+1. Shorten pre-period (exclude high-variance events like Christmas)
+2. Run covariate audit -- remove anything that changed >10% during intervention
 3. Check for redundancy with built-in model components (e.g., nseasons)
 4. THEN add better covariates (intensity curves, weather, interactions)
 
-**But:** Document every experiment. If the "best" spec is the only one that achieves significance,
-it is exploratory. Lead with the Bayesian posterior probability across ALL specs, not the
-cherry-picked p-value.
+**Critical caveat:** Document every experiment. If only the "best" spec achieves significance
+out of N tested, the result is exploratory. Lead with the Bayesian posterior probability across
+ALL specs, not the cherry-picked p-value. See the Claim Framing Guide below.
 
-## Claim Framing Guide (from adversarial review)
-
-A multi-agent review panel (Statistical Rigor Reviewer, Feasibility Analyst, Code Quality
-Auditor, Devil's Advocate + Supreme Judge) identified this as the most critical lesson:
+## Claim Framing Guide
 
 **The client doesn't need p < 0.05. They need to know whether to run the promo again.**
 
@@ -751,12 +673,9 @@ The promo drove conversion (+14%), not traffic."
 
 ### Scorecard framing
 
-When showing validation scorecards across deliverables:
-- **All deliverables must show the same primary p-value.** If the deck says "Pass" and the
-  report says "Fail" for the same test, the client loses trust immediately.
-- Show the primary (first-specified or pre-registered) p-value as the main result.
-- If an optimised spec achieves a better p-value, show it separately labeled "Exploratory."
-- The convergence of all specs on a positive direction IS the strongest evidence — foreground it.
+- **All deliverables must show the same primary p-value** -- inconsistency destroys trust.
+- Primary (pre-registered) p-value is the main result; optimised specs labeled "Exploratory."
+- Convergence of all specs on positive direction IS the strongest evidence -- foreground it.
 
 ### The specification search trap
 
@@ -769,43 +688,22 @@ When showing validation scorecards across deliverables:
 
 ### Synthetic data in charts
 
-Never use `Math.random()` for client-facing charts without a clear "illustrative" label.
-Always export `ci.inferences` during the analysis step and embed real model predictions.
-A client who reloads the page and sees different numbers will question everything.
+Never use `Math.random()` for client-facing charts without an "illustrative" label.
+Always embed real model predictions from `ci.inferences`.
 
-## Key Pitfalls to Avoid
+## Key Pitfalls
 
-1. **Using covariates affected by the intervention** — the #1 failure mode. Always check
-   whether the campaign could have influenced each covariate.
-
-2. **Binary flags for high-variance events** — use continuous intensity variables instead.
-   A binary `sale_flag` can't explain why BF is 5x a normal sale day.
-
-3. **Claiming significance when p > 0.10** — destroys credibility. Be honest about uncertainty.
-
-3b. **Claiming significance from specification search** — if you tested N specs and only the
-   "best" achieved p < 0.05, the result is exploratory. Bonferroni correction: multiply p by N.
-   Lead with the Bayesian posterior across all specs instead. This was the #1 finding from
-   adversarial review of the Schuh deliverables.
-
-4. **Too-long pre-periods with structural breaks** — if predictions get worse with more data,
-   shorten the pre-period. Find the sweet spot.
-
-5. **Ignoring the Christmas distortion** — for retail clients, BF/Christmas introduces extreme
-   variance that inflates all credible intervals. Model it explicitly.
-
-6. **Running only one method** — a single implementation might have bugs or assumptions that
-   bias the result. Two independent methods with different inference engines is the gold standard.
-
-7. **Forgetting the dependency conflict** — tfcausalimpact and CausalPy cannot coexist in the
-   same Python environment. Always run in separate scripts.
-
-8. **Including high-variance seasonal periods in the pre-period** — For retail clients, the
-   Christmas/Black Friday period can inflate credible intervals by 30%+. Test excluding it:
-   start the pre-period after Jan 6 (post-Christmas hangover). In the Schuh case, this reduced
-   CI width from £1,032K to £752K (-27%) and improved p-value from 0.215 to 0.163 while the
-   effect estimate remained stable (£182K vs £198K). Always run a pre-period sensitivity test
-   with multiple start dates to find the optimal noise/data tradeoff.
+| # | Pitfall | Fix |
+|---|---|---|
+| 1 | Covariates affected by intervention | Run covariate audit; test with/without |
+| 2 | Binary flags for high-variance events | Use continuous intensity variables |
+| 3 | Claiming significance when p > 0.10 | Be honest about uncertainty |
+| 3b | Claiming significance from spec search | Bonferroni correction; lead with posterior across all specs |
+| 4 | Too-long pre-periods with structural breaks | Shorten; test multiple start dates |
+| 5 | Ignoring Christmas/BF distortion | Model explicitly with intensity curves |
+| 6 | Running only one method | Always run dual methods (tfcausalimpact + CausalPy) |
+| 7 | Dependency conflict | Run tfcausalimpact and CausalPy in separate scripts |
+| 8 | Including BF/Christmas in pre-period | Exclude; start after Jan 6 (can reduce CIs by 27%) |
 
 ## Reference: Covariate Correlation Benchmarks
 
@@ -837,17 +735,10 @@ From the Schuh engagement — key lessons about which methods work for campaigns
 | **RDiT** | **+18.3%, CI [£8K, £71K] — significant** | Local boundary comparison avoids global variance problem |
 | **Conformal CI** | £154K, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
 
-**Key strategic insight:** For short campaigns (< 7 days), **RDiT should be the lead method**, not BSTS.
-BSTS is powerful for long interventions where the full time series structure matters, but for short
-campaigns the global variance dominates. RDiT focuses only on the local discontinuity at the boundary,
-sidestepping the noise problem entirely. Use BSTS as a supporting method for the full counterfactual
-decomposition, and RDiT for the significance claim.
-
-**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in the Schuh
-case — a dramatic improvement. Use the pre-period residual quantile approach: `np.quantile(np.abs(residuals), 0.95)`.
-
-**Fourier seasonality (k=1..4):** Did NOT help with ~17 months of data (+0.9% CI width). Requires 2+ full
-annual cycles to learn meaningful patterns. Don't add Fourier terms unless the pre-period spans 2+ years.
+**Key insights:**
+- Short campaigns (< 7 days): RDiT leads (local boundary), BSTS supports (full decomposition)
+- Always run conformal CIs alongside Bayesian (were 61% tighter in Schuh case)
+- Fourier seasonality (k=1..4): requires 2+ years of data; skip with shorter pre-periods
 
 ## Reference: Pre-period Start Date Sensitivity
 
@@ -860,50 +751,14 @@ From the Schuh engagement (UK footwear retail):
 | Feb 2025 | Post-winter-sale | 391 | -30% | 0.183 |
 | Mar 2025 | Spring onward | 363 | -31% | 0.161 |
 
-The sweet spot is usually just after the major seasonal peak — enough data to learn patterns,
-but excluding the period that dominates the variance. For UK retail, Jan 6 (post-Christmas
-hangover) is a reliable default.
+Sweet spot: just after the major seasonal peak. For UK retail, Jan 6 (post-Christmas) is a reliable default.
 
-## Reference: Environment & Dependency Gotchas
+## Reference: Environment Gotchas
 
-### numpy version conflict (tfcausalimpact vs CausalPy)
-
-These two packages **cannot coexist** in the same Python environment:
-
-| Package | numpy | pandas | Notes |
-|---|---|---|---|
-| `tfcausalimpact` | < 2.0 | <= 2.2 | TensorFlow 2.16 needs numpy 1.x |
-| `CausalPy` | >= 2.0 | >= 3.0 | PyMC/PyTensor needs numpy 2.x |
-
-**Workflow:** Run tfcausalimpact first (numpy<2), then `pip install "numpy>=2"`, then run
-CausalPy in a separate script. Never import both in the same process.
-
-**CausalPy on macOS:** Requires `cores=1` in `sample_kwargs` — the default multiprocessing
-fork causes `RuntimeError: An attempt has been made to start a new process before the current
-process has finished its bootstrapping phase`. Fix:
-
-```python
-model=cp.pymc_models.LinearRegression(
-    sample_kwargs={"random_seed": 42, "chains": 4, "draws": 2000, "tune": 1000, "cores": 1}
-)
-```
-
-### Weather data: Open-Meteo API
-
-Best free source for daily weather covariates (temperature, precipitation). No API key needed.
-
-```bash
-# Corporate SSL proxies may block Python requests — use curl -sk to bypass
-curl -sk "https://archive-api.open-meteo.com/v1/archive?latitude=51.5074&longitude=-0.1278&start_date=2024-10-01&end_date=2026-03-15&daily=temperature_2m_mean,precipitation_sum&timezone=Europe/London"
-```
-
-For recent days not yet in the archive, backfill from the forecast API:
-`https://api.open-meteo.com/v1/forecast` (same parameters).
-
-### Python version mismatch
-
-`pip3 install` may install to a different Python version's site-packages. Always use:
-```bash
-python3 -m pip install <package>  # installs to the correct python3's site-packages
-```
-Verify with `python3 -m pip show <package> | grep Location`.
+| Issue | Fix |
+|---|---|
+| numpy conflict (tfcausalimpact `<2` vs CausalPy `>=2`) | Run in separate scripts; tfcausalimpact first, then upgrade numpy |
+| CausalPy macOS multiprocessing crash | Set `cores=1` in `sample_kwargs` |
+| Corporate SSL blocking Open-Meteo | Use `curl -sk` or `verify=False` |
+| pip installs to wrong Python | Use `python3 -m pip install <package>` |
+| Recent weather not in archive | Backfill from `api.open-meteo.com/v1/forecast` |

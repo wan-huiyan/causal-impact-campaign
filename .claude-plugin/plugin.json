@@ -1,7 +1,7 @@
 {
   "name": "causal-impact-campaign",
   "description": "Measure the causal impact of marketing campaigns, promos, or interventions on business metrics using Bayesian structural time series. Covers the full pipeline: data exploration, covariate engineering, dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing deliverables.",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "author": {
     "name": "Huiyan Wan"
   },

@@ -1,6 +1,6 @@
 {
   "skill_name": "causal-impact-campaign",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "created_by": "manual",
   "triggers": [
     {
@@ -391,6 +391,121 @@
           "description": "Provides honest interpretation guidance"
         }
       ]
+    },
+    {
+      "id": "tc-7",
+      "prompt": "We have daily revenue data with organic sessions, paid sessions, and holiday flags. Help me engineer the right covariates for the causal impact model — the campaign was a delivery promo.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(safe|safety|affect|absorb|contaminate|bias)",
+          "description": "Discusses covariate safety relative to the intervention"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(organic|paid|split|separate)",
+          "description": "Recommends splitting aggregate sessions"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(intensity|continuous|binary|flag)",
+          "description": "Recommends intensity encoding over binary flags"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(audit|correlation|test.*with.*without)",
+          "description": "Suggests covariate audit or sensitivity testing"
+        }
+      ]
+    },
+    {
+      "id": "tc-8",
+      "prompt": "I've run the causal impact analysis and got results. Now I need to validate whether the model is reliable. What validation steps should I run?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(backtest|rolling|placebo|pre.?period)",
+          "description": "Recommends backtesting and placebo tests"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(WAPE|coverage|calibrat|accuracy)",
+          "description": "Mentions prediction accuracy metrics"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(scorecard|threshold|pass|fail)",
+          "description": "References validation scorecard"
+        }
+      ]
+    },
+    {
+      "id": "tc-9",
+      "prompt": "Run a causal impact analysis but start the pre-period from October — that includes the Christmas period. Is that a problem?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(Christmas|Black Friday|BF|seasonal|holiday|variance)",
+          "description": "Identifies Christmas/BF as high-variance problem"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(exclude|shorten|start.*after|Jan|pre.?period)",
+          "description": "Suggests excluding or shortening the pre-period"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(credible|interval|CI|inflate|widen|width)",
+          "description": "Explains impact on credible intervals"
+        }
+      ]
+    },
+    {
+      "id": "tc-10",
+      "prompt": "Decompose the campaign effect — did it lift conversion rate, average order value, or transaction count?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(conversion|CR|rate)",
+          "description": "Mentions conversion rate decomposition"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(AOV|average order|basket)",
+          "description": "Mentions average order value decomposition"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(transaction|order count|volume)",
+          "description": "Mentions transaction count decomposition"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(separate|individual|each|lever)",
+          "description": "Runs separate CausalImpact per metric"
+        }
+      ]
+    },
+    {
+      "id": "tc-11",
+      "prompt": "I need to add weather data as a covariate for our UK retail causal impact analysis. How do I get it?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(Open.?Meteo|weather|temperature|precipitation)",
+          "description": "References Open-Meteo API or weather variables"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(exogenous|safe|orthogonal|covariate)",
+          "description": "Explains weather as a safe exogenous covariate"
+        }
+      ]
     }
   ],
   "edge_cases": [
@@ -456,6 +571,45 @@
           "type": "pattern",
           "value": "(?i)(monthly|granular|few|observation|sample|power|limited|daily)",
           "description": "Addresses monthly granularity limitations"
+        }
+      ]
+    },
+    {
+      "id": "ec-6",
+      "prompt": "The campaign is permanent — we changed our pricing forever. Can I still use causal impact?",
+      "category": "permanent_intervention",
+      "expected_behavior": "Explain that causal impact works for permanent interventions but post-period keeps growing, discuss implications for counterfactual drift",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(permanent|ongoing|indefinite|counterfactual|drift|diverge|long.?term)",
+          "description": "Addresses permanent intervention implications"
+        }
+      ]
+    },
+    {
+      "id": "ec-7",
+      "prompt": "Our data has a lot of missing values and some days show zero revenue. Can I still run the analysis?",
+      "category": "data_quality",
+      "expected_behavior": "Advise on handling missing data: interpolation, imputation, or exclusion. Zero revenue days may be tracking issues.",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(missing|impute|interpolat|zero|fill|clean|quality|tracking)",
+          "description": "Addresses data quality and missing value handling"
+        }
+      ]
+    },
+    {
+      "id": "ec-8",
+      "prompt": "We want to measure the impact on three different metrics: revenue, sign-ups, and page views. Run all three.",
+      "category": "multiple_metrics",
+      "expected_behavior": "Run separate CausalImpact analyses per metric, warn about multiple comparison correction",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(separate|each|individual|multiple|per metric|comparison|correction|Bonferroni)",
+          "description": "Handles multiple metrics with appropriate statistical consideration"
         }
       ]
     }
