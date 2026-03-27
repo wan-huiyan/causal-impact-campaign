@@ -40,6 +40,8 @@ idempotency: |
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
 namespace: causal_impact
 composable_with:
+  - permutation-validation: Validate model p-values with empirical permutation tests (REQUIRED before presenting results)
+  - cloud-run-batch-experiment: Scale permutation tests and sensitivity analyses to GCP Cloud Run Jobs
   - client-proposal-slide: Pass findings to create stakeholder-ready presentation
   - frontend-design: Build custom interactive dashboards from analysis results
   - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
@@ -326,10 +328,14 @@ then upgrade numpy and run CausalPy.
 from causalimpact import CausalImpact
 
 MODEL_ARGS = {
-    "nseasons": 7,            # day-of-week seasonality
+    "nseasons": 7,            # day-of-week seasonality (try 14 for fortnightly/payday cycles)
     "standardize_data": True,  # z-score normalisation
-    "fit_method": "vi",        # variational inference (fast)
+    "fit_method": "vi",        # variational inference (fast; HMC is more conservative but slower)
 }
+# NOTE: nseasons=14 (two-week seasonality) achieved p=0.023 vs nseasons=7 p<0.05 in a retail
+# engagement. This captures fortnightly payday cycles (25th-3rd spending windows). Always test
+# nseasons=7 vs 14 and report both. nseasons=14 is a model configuration change, not data
+# exclusion — more defensible than masking if challenged on specification search.
 
 # Data must be a DataFrame with DatetimeIndex, target in first column
 ci = CausalImpact(data[required_cols], pre_period, post_period, model_args=MODEL_ARGS)
@@ -444,7 +450,15 @@ If it sits in the middle (50-70th percentile), the model can't distinguish it fr
 | Mean 95% coverage | ≥ 80% | Uncertainty bands are well-calibrated |
 | Placebo rank | ≥ 90th %ile | Real effect is unusual vs noise |
 | All specs same direction | ≥ (N-1)/N | Result is robust to covariate choice |
-| Primary p-value | ≤ 0.10 | Effect is statistically significant |
+| Primary p-value (BSTS) | ≤ 0.10 | Effect is statistically significant (model-based) |
+| **Permutation p-value** | **≤ 0.10** | **Effect is unusual vs random dates (empirical)** |
+
+> **The permutation test is now REQUIRED, not optional.** BSTS p-values can be overconfident
+> when masking or tight model configurations (e.g., nseasons=14) are used. In a retail engagement,
+> BSTS p=0.017 corresponded to permutation p=0.24 (11/49 random dates matched the real effect).
+> The permutation p is the honest measure of whether the effect is genuinely distinguishable.
+> Run 50+ random intervention dates with the same model config. Use 1-model-per-Cloud-Run-job
+> for maximum parallelism (~10 min wall time for 50 permutations).
 
 Passing all 5 = strong result. Passing 3+ with consistent direction = defensible.
 Failing most = honest finding — report it as such.
@@ -529,8 +543,11 @@ persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
 - Ratio 10-50%: Partial persistence — mention as additional upside
 - Ratio < 10%: Effect dissipated — report promo-period only
 
-In the retail case study: 66% persistence over 2 weeks, making the total impact considerably larger than
-the headline promo-period figure.
+**Warning:** Persistence analysis is unreliable for short campaigns. In a retail case study, persistence
+ratios ranged from 55% to 188% across specifications (median ~97%). An extended post-period test (17 days)
+showed a large cumulative estimate cumulative — clearly a model artefact, not genuine persistence. BSTS continues to
+underpredict after the intervention ends because the structural break shifts the level.
+Frame persistence as "inconclusive" unless multiple specs agree and the extended post-period is plausible.
 
 ### Weather Covariate
 
@@ -558,6 +575,42 @@ temperature.
 
 **SSL note:** Corporate proxies may block the Open-Meteo API. Use `curl -sk` to bypass, or
 `requests.get(..., verify=False)`.
+
+### Prophet Cross-Validation
+
+For high-stakes claims, run Facebook Prophet as an independent cross-validation method. Prophet
+uses additive decomposition (Fourier seasonality + changepoint trend) — a fundamentally different
+model family from BSTS (structural time series + state space). Agreement on both direction AND
+magnitude across model families is much more convincing than multiple specs within the same model.
+
+```python
+from prophet import Prophet
+import logging
+logging.getLogger("prophet").setLevel(logging.WARNING)
+logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
+
+m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
+m.add_regressor("organic_sessions")  # add key exogenous regressors
+m.fit(train_df)  # pre-period only, columns: ds, y, organic_sessions
+forecast = m.predict(future_df)  # post-period dates + regressor values
+# Effect = actual - yhat; CI from yhat_lower/yhat_upper
+```
+
+Prophet does not produce a frequentist p-value. Report as "CI excludes zero" if
+`actual_sum - yhat_upper_sum > 0`. In the retail case study, Prophet gave a moderate uplift with
+CI [£11K, £396K] — consistent with BSTS (a moderate uplift) and RDiT (a moderate uplift).
+
+### Contaminated Exogenous Metrics
+
+**Never use Google Trends, social mentions, or brand search data as covariates in promo analysis.**
+These metrics are endogenous — the promo itself drives search interest and social mentions. Using them
+as covariates absorbs part of the treatment effect into the "explained" bucket, exactly like contaminated
+paid_sessions (lesson 2). In a retail case study, adding Google Trends "the retailer" search index worsened
+p from 0.047 to 0.096 and dropped the effect estimate from a moderate uplift to a moderate uplift.
+
+The contamination test: did the metric change *because of* the promo? If yes, it's endogenous. Only use
+external metrics that are clearly exogenous to the intervention (weather, macroeconomic indicators,
+competitor pricing).
 
 ## Step 7: Document
 
@@ -830,6 +883,32 @@ Masking is a data preparation decision, not model tuning — it's more defensibl
 specification search. In a UK retail engagement, masking both winter sale periods
 reduced CI width by 60% (a wide CI → a narrower CI) and moved p from 0.190 to 0.047.
 
+**CRITICAL caveat — masking + tight models can cause overconfident permutation results:**
+In a subsequent validation, the masked spec (p<0.05 BSTS) showed permutation p=0.22
+(11/49 random dates produced effects as large as the real promo). ALL specs with
+mask_nov_jan + nseasons=14 showed permutation p > 0.15 — including enriched covariate
+variants (3 to 13 covariates). The masking removes high-variance months, leaving only
+calm Feb-Oct data. The model becomes very "sure" of predictions from this calm period,
+producing low p-values for BOTH real and random intervention dates.
+
+**Always validate masking with a permutation test (50+ random dates).** If permutation
+p > 0.10 while BSTS p < 0.05, the model is overconfident. Report BOTH p-values:
+"BSTS p=0.017 (model-based), permutation p=0.24 (empirical)" — the permutation p
+is the honest one.
+
+**Mask width matters:** In a retail engagement, mask_nov_jan (wide, 330 training days)
+produced permutation p=0.22, while mask_xmas (BF-Jan 5 only, 410 training days) achieved
+permutation p=0.059. The narrower mask is better because:
+1. It keeps November pre-BF data which has useful variance patterns
+2. Pre-BF revenue spikes (z=+13) are INFORMATIVE — they teach the model that revenue
+   CAN spike for non-promo reasons, making it less likely to flag random dates
+3. More training data = better model calibration
+
+**Weather covariates for permutation robustness:** Weather (temp + precipitation) had
+minimal BSTS impact (CI -3.2%) but was the single biggest permutation improver (0.098→0.059).
+Truly exogenous, orthogonal signals help the model explain residual variance at random dates
+without overfitting to seasonal patterns. Always include weather if available.
+
 **Where does the probability come from?** Use 1-p from your recommended spec.
 If you have masked and unmasked variants, quote both: "95% with masking, 81% without."
 Never let the headline probability come from an overconfident short pre-period (p≈0).
@@ -915,7 +994,13 @@ A client who reloads the page and sees different numbers will question everythin
     sensitivity rerun. In the retail case study, 16 specs gave p=0.102-0.469, mapping to 53-90% probability.
     The honest range is ~75-90%, not 80-96%.
 
-11. **Internal reference docs drifting from deliverable framing** — After a review panel prompts
+11. **Temporal scope gaps in seasonal exclusions** — When a spec claims to "exclude Christmas"
+    or "mask winter sales," verify it covers ALL instances across the full date range. With 2+
+    years of data, a Jan 6 start date only excludes the first Christmas. The second one is still
+    in the training window. This evaded 3 rounds of adversarial review in a real engagement.
+    Always label exclusions with specific years: "masks Nov-Jan 2024 + 2025 (both years)."
+
+12. **Internal reference docs drifting from deliverable framing** — After a review panel prompts
     reframing (e.g., from "p<0.05, significant" to "80-90% probability, exploratory"), update the
     internal reference document (ANALYSIS_FINDINGS.md exec summary, narrative sections) in the SAME
     commit as the deliverables. Auditors and new team members read the internal doc first. If it still
@@ -1046,11 +1131,57 @@ Masking BF-Jan 5 keeps 410 days and drops std from a moderate uplift to £93K �
 CI is 3x tighter than other specs, the model is underestimating uncertainty — not finding a
 stronger signal. The Jan 6 2026 spec (52 days) should always carry a caveat.
 
+**Temporal scope verification (critical):** When masking or excluding seasonal periods, count
+how many instances exist in your date range and verify ALL are handled. Common mistake: "Jan 6
+pre-period start" was labeled "excludes Christmas" but only excluded Christmas 2024 — Christmas
+2025 was still in the 14-month training window. Three rounds of adversarial review (12 reviewers)
+missed this; the analyst caught it 6 days later. Always label specs precisely: "excludes Christmas
+2024 only" vs "masks Christmas 2024 + 2025 (both years)."
+
+```python
+# Verify temporal scope: count instances before masking
+import pandas as pd
+for event_name, month_start, month_end in [('Christmas/winter', 11, 1)]:
+    instances = []
+    for year in df.index.year.unique():
+        mask = (df.index >= f'{year}-{month_start:02d}-01') & (df.index <= f'{year+1}-{month_end:02d}-31')
+        if mask.any():
+            instances.append(year)
+    print(f"{event_name}: {len(instances)} instances in data ({instances})")
+    # Ensure your masking covers ALL instances, not just the first
+```
+
 **Implementation:** Drop masked dates from the DataFrame before passing to CausalImpact:
 ```python
 for start, end in [('2024-11-01', '2025-01-31'), ('2025-11-01', '2026-01-31')]:
     df = df.loc[~((df.index >= start) & (df.index <= end))]
 ```
+
+## Reference: Leave-One-Out Covariate Sensitivity
+
+After finding the best covariate bundle, run leave-one-out to identify noise contributors:
+
+```python
+base_covs = ['organic_sessions', 'sin_dow', 'cos_dow', 'xmas_intensity', 'payday_window_flag']
+for drop in base_covs:
+    subset = [c for c in base_covs if c != drop]
+    # Run CausalImpact with subset, record p-value and effect
+```
+
+From a UK retail engagement (5-covariate enhanced bundle, mask_nov_jan):
+
+| Dropped | p-value | Effect | Verdict |
+|---|---|---|---|
+| None (full model) | 0.068 | £149K | Baseline |
+| cos_dow | **0.033** | £177K | **Noise — model improves without it** |
+| payday_window_flag | 0.040 | £218K | Marginal — can be dropped |
+| xmas_intensity | 0.055 | — | Helpful but not critical |
+| sin_dow | 0.056 | — | Helpful but not critical |
+| organic_sessions | **0.148** | — | **Critical — model collapses without it** |
+
+**Key insight:** More covariates is not always better. cos_dow was adding noise because nseasons=7
+already captures weekly seasonality internally (see Lesson 7). The pruned model (4 covariates)
+outperformed the full model (5 covariates).
 
 ## Reference: Cloud Run for Batch BSTS Runs
 

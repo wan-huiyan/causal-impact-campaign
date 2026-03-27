@@ -40,6 +40,8 @@ idempotency: |
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
 namespace: causal_impact
 composable_with:
+  - permutation-validation: Validate model p-values with empirical permutation tests (REQUIRED before presenting results)
+  - cloud-run-batch-experiment: Scale permutation tests and sensitivity analyses to GCP Cloud Run Jobs
   - client-proposal-slide: Pass findings to create stakeholder-ready presentation
   - frontend-design: Build custom interactive dashboards from analysis results
   - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale

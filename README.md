@@ -253,6 +253,13 @@ Built from real causal inference methodology applied to time series analysis. Th
 - [ ] **Heterogeneous treatment effects** — varying intervention intensity analysis
 - [ ] **Automated Cloud Run deployment** — one-command setup for parallel spec execution
 
+## Companion Skills
+
+These skills form a complete causal inference toolkit when used together:
+
+- **[permutation-validation](https://github.com/wan-huiyan/permutation-validation)** — Validate model p-values with empirical permutation tests (REQUIRED before presenting results)
+- **[cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment)** — Scale permutation tests and sensitivity analyses to GCP Cloud Run Jobs
+
 ## Related Skills
 
 - **[ml-feature-evaluator](https://github.com/wan-huiyan/ml-feature-evaluator)** — Structured feature evaluation diagnostic
