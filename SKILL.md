@@ -294,7 +294,7 @@ whether they agree is far more convincing than any single p-value.
 | Method | What it does | When to use | Key limitation |
 |---|---|---|---|
 | **BSTS (tfcausalimpact)** | Decomposes time series into trend + seasonality + regression, projects counterfactual | Always — the primary analysis. Full decomposition with covariates | Struggles with short campaigns (<7 days) — daily variance overwhelms signal |
-| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine | No time series structure (no trend/seasonal components) |
+| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine. **Caution:** Earlier versions parsed a regression coefficient from CausalPy's summary table, which picked the wrong parameter and produced a -a large negative outlier outlier. **Fixed:** now uses posterior predictions (observed − counterfactual), matching `analysis/run_exploration_causalpy.py`. Always cross-check with BSTS and RDiT. | No time series structure (no trend/seasonal components) |
 | **RDiT** | Local linear regression at the intervention boundary, bootstrap CIs | **Especially for short campaigns.** Only method that achieved significance for 4-day promo | Ignores data far from cutoff; sensitive to bandwidth; no decomposition |
 | **Conformal CIs** | Distribution-free prediction intervals from pre-period residual quantiles | Always — sanity check on Bayesian CIs. If 2x wider → model overconfident; if 2x narrower → model over-conservative | Can't compute probability of effect; sensitive to pre-period outliers |
 
@@ -312,6 +312,32 @@ Campaign duration >= 14 days?
 **Always document methods that didn't work** — transparency about what was tried and why it
 failed is as valuable as positive results. Include in the findings doc's "What Worked and
 What Didn't" section.
+
+### Cloud Run Speed Estimates
+
+Actual Cloud Run timings (including cold start overhead):
+- **Fast methods** (BSTS VI, RDiT, Conformal): ~1-2 min per method
+- **Moderate methods** (CausalPy Bayesian LR): ~3-5 min
+- **Slow methods** (BSTS HMC): ~10-15 min
+
+Total for all 6 methods in parallel: ~14 min (limited by HMC).
+
+### BigQuery Dataset Location
+
+The `your-project-id.your_dataset` dataset is in **europe-west2** (London). BQ clients
+must set `location="europe-west2"` explicitly — without it, queries fail with
+"Dataset not found in location US". Discovery command:
+```bash
+bq show --format=prettyjson your-project-id:your_dataset | grep location
+```
+
+### Consensus and Outlier Detection
+
+When aggregating results across methods, use median (not mean) for consensus — it handles
+outliers gracefully. Flag any method whose effect estimate disagrees in sign with the majority
+or exceeds 3x the median magnitude. In the the retailer analysis, CausalPy returned -a large negative outlier while
+all other methods showed +£160-212K — the consensus median correctly reflected the positive
+signal, but the outlier should be explicitly flagged in the report.
 
 ### Important: Dependency Conflict
 
@@ -750,6 +776,12 @@ const DATA = {
 ```
 
 **Key implementation notes:**
+- **Per-method prediction lines:** Each method can return its own counterfactual series via
+  `return_series=True`. BSTS returns full pre+post predictions; RDiT returns local regression
+  within bandwidth (null outside); CausalPy returns posterior predictive mean. Store as
+  `per_method_series = { method_id: { dates, predicted, upper?, lower? } }` alongside the
+  primary `chart_series`. Render with distinct colors (BSTS teal, RDiT orange, CausalPy purple).
+  Add an "Uplift from" dropdown to select which method's counterfactual drives the uplift arrow.
 - **Data size:** Daily granularity × ~30 days around intervention × a few scenarios = tiny (<100KB JSON).
   The Plotly.js CDN (~3.5MB) is the main dependency — cached after first load.
 - **Counterfactual data source options:**
