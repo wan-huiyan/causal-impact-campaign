@@ -161,8 +161,8 @@ Safe controls for most campaign types:
 
 > **Always test with and without suspect covariates.** If removing a covariate increases the
 > effect estimate substantially (>20%), it's likely absorbing the causal signal. In a retail
-> case, removing `paid_sessions` increased the effect by a meaningful amount (+36%) and improved p-value from
-> 0.142 to 0.060 — achieving BSTS significance for the first time.
+> case study, removing `paid_sessions` increased the effect by ~36% and improved p-value by
+> roughly half — achieving BSTS significance for the first time.
 
 ### Covariate Engineering Recipes
 
@@ -187,7 +187,7 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 
 #### 3. Holiday intensity (not binary flags)
 Holiday intensity encoding is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
-sale days equally, but Black Friday (a peak sale day) is 5x a regular sale day (a normal sale day). The model
+sale days equally, but Black Friday revenue can be 5x a regular sale day. The model
 sees a massive unexplained residual, which inflates variance estimates and widens ALL
 credible intervals — including for your promo period.
 
@@ -294,7 +294,7 @@ whether they agree is far more convincing than any single p-value.
 | Method | What it does | When to use | Key limitation |
 |---|---|---|---|
 | **BSTS (tfcausalimpact)** | Decomposes time series into trend + seasonality + regression, projects counterfactual | Always — the primary analysis. Full decomposition with covariates | Struggles with short campaigns (<7 days) — daily variance overwhelms signal |
-| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine. **Caution:** Earlier versions parsed a regression coefficient from CausalPy's summary table, which picked the wrong parameter and produced a -a large negative outlier outlier. **Fixed:** now uses posterior predictions (observed − counterfactual), matching `analysis/run_exploration_causalpy.py`. Always cross-check with BSTS and RDiT. | No time series structure (no trend/seasonal components) |
+| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine. **Caution:** Earlier versions parsed a regression coefficient from CausalPy's summary table, which picked the wrong parameter and produced a large negative outlier. **Fixed:** now uses posterior predictions (observed − counterfactual). Always cross-check with BSTS and RDiT. | No time series structure (no trend/seasonal components) |
 | **RDiT** | Local linear regression at the intervention boundary, bootstrap CIs | **Especially for short campaigns.** Only method that achieved significance for 4-day promo | Ignores data far from cutoff; sensitive to bandwidth; no decomposition |
 | **Conformal CIs** | Distribution-free prediction intervals from pre-period residual quantiles | Always — sanity check on Bayesian CIs. If 2x wider → model overconfident; if 2x narrower → model over-conservative | Can't compute probability of effect; sensitive to pre-period outliers |
 
@@ -324,7 +324,7 @@ Total for all 6 methods in parallel: ~14 min (limited by HMC).
 
 ### BigQuery Dataset Location
 
-The `your-project-id.your_dataset` dataset is in **europe-west2** (London). BQ clients
+If your BQ dataset is in a non-US region (e.g., **europe-west2**), BQ clients
 must set `location="europe-west2"` explicitly — without it, queries fail with
 "Dataset not found in location US". Discovery command:
 ```bash
@@ -335,8 +335,8 @@ bq show --format=prettyjson your-project-id:your_dataset | grep location
 
 When aggregating results across methods, use median (not mean) for consensus — it handles
 outliers gracefully. Flag any method whose effect estimate disagrees in sign with the majority
-or exceeds 3x the median magnitude. In the the retailer analysis, CausalPy returned -a large negative outlier while
-all other methods showed +£160-212K — the consensus median correctly reflected the positive
+or exceeds 3x the median magnitude. In one retail engagement, CausalPy returned a large negative
+outlier while all other methods showed moderate positive effects — the consensus median correctly reflected the positive
 signal, but the outlier should be explicitly flagged in the report.
 
 ### Important: Dependency Conflict
@@ -354,14 +354,15 @@ then upgrade numpy and run CausalPy.
 from causalimpact import CausalImpact
 
 MODEL_ARGS = {
-    "nseasons": 7,            # day-of-week seasonality (try 14 for fortnightly/payday cycles)
+    "nseasons": 14,           # biweekly seasonality — RECOMMENDED default (captures payday cycles)
     "standardize_data": True,  # z-score normalisation
     "fit_method": "vi",        # variational inference (fast; HMC is more conservative but slower)
 }
-# NOTE: nseasons=14 (two-week seasonality) achieved p=0.023 vs nseasons=7 p<0.05 in a retail
-# engagement. This captures fortnightly payday cycles (25th-3rd spending windows). Always test
-# nseasons=7 vs 14 and report both. nseasons=14 is a model configuration change, not data
-# exclusion — more defensible than masking if challenged on specification search.
+# NOTE: nseasons=14 (biweekly) is the recommended default. It achieved roughly half the
+# p-value of nseasons=7 in a retail engagement. This captures fortnightly
+# payday cycles (25th-3rd spending windows). The webapp now defaults to tfci_vi_biweekly.
+# Always test nseasons=7 alongside 14 and report both. nseasons=14 is a model configuration
+# change, not data exclusion — more defensible than masking if challenged on specification search.
 
 # Data must be a DataFrame with DatetimeIndex, target in first column
 ci = CausalImpact(data[required_cols], pre_period, post_period, model_args=MODEL_ARGS)
@@ -541,8 +542,8 @@ After the primary analysis, run these extensions to deepen the insight:
 Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
 **which lever the campaign pulled** — was it conversion, basket size, or traffic?
 
-In the retail case study: conversion rate showed the strongest signal (+14.3%, p=0.167, 83% prob positive)
-while AOV barely moved (+0.7%). This told us the delivery promo removed a conversion barrier — people
+In one retail case study: conversion rate showed the strongest signal (~+14%, ~83% prob positive)
+while AOV barely moved. This told us the delivery promo removed a conversion barrier — people
 already browsing decided to buy because delivery was free. They didn't spend more per order.
 
 This is often the most valuable insight for the client — it informs future offer design.
@@ -571,7 +572,7 @@ persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
 
 **Warning:** Persistence analysis is unreliable for short campaigns. In a retail case study, persistence
 ratios ranged from 55% to 188% across specifications (median ~97%). An extended post-period test (17 days)
-showed a large cumulative estimate cumulative — clearly a model artefact, not genuine persistence. BSTS continues to
+showed implausibly large cumulative effects — clearly a model artefact, not genuine persistence. BSTS continues to
 underpredict after the intervention ends because the structural break shifts the level.
 Frame persistence as "inconclusive" unless multiple specs agree and the extended post-period is plausible.
 
@@ -596,7 +597,7 @@ an orthogonal exogenous signal that can tighten credible intervals by 2-5%. Wort
 available, but not transformative.
 
 **Why weather matters for retail:** Rain/cold drives online purchasing (people stay home). For
-footwear specifically, seasonal patterns (boots in autumn, sandals in spring) correlate with
+retail specifically, seasonal patterns (boots in autumn, sandals in spring) correlate with
 temperature.
 
 **SSL note:** Corporate proxies may block the Open-Meteo API. Use `curl -sk` to bypass, or
@@ -623,20 +624,71 @@ forecast = m.predict(future_df)  # post-period dates + regressor values
 ```
 
 Prophet does not produce a frequentist p-value. Report as "CI excludes zero" if
-`actual_sum - yhat_upper_sum > 0`. In the retail case study, Prophet gave a moderate uplift with
-CI [£11K, £396K] — consistent with BSTS (a moderate uplift) and RDiT (a moderate uplift).
+`actual_sum - yhat_upper_sum > 0`. In one retail case study, Prophet showed a moderate positive effect with
+CI excluding zero — consistent with BSTS and RDiT.
 
 ### Contaminated Exogenous Metrics
 
-**Never use Google Trends, social mentions, or brand search data as covariates in promo analysis.**
-These metrics are endogenous — the promo itself drives search interest and social mentions. Using them
-as covariates absorbs part of the treatment effect into the "explained" bucket, exactly like contaminated
-paid_sessions (lesson 2). In a retail case study, adding Google Trends "the retailer" search index worsened
-p from 0.047 to 0.096 and dropped the effect estimate from a moderate uplift to a moderate uplift.
+**Never use Google Trends brand search or sale detection flags as covariates in promo analysis.**
+These metrics are endogenous — the promo itself drives search interest. Using them as covariates absorbs
+part of the treatment effect, exactly like contaminated paid_sessions (lesson 2).
 
-The contamination test: did the metric change *because of* the promo? If yes, it's endogenous. Only use
-external metrics that are clearly exogenous to the intervention (weather, macroeconomic indicators,
-competitor pricing).
+Validated with real Google Trends data: adding a brand search index as a covariate worsened p by ~3x
+and dropped the effect estimate by ~30%. Similarly, `sale_type_flag` worsened p by ~2x when the
+intervention IS a sale (the flag captures the campaign itself).
+
+**Safe exogenous alternatives:**
+- `trend_brand_share` (brand / brand+competitors) — relative metric, partially cancels campaign effect
+- `trend_category` (e.g., "buy shoes online") — market-level demand, exogenous to specific brand
+- `trend_competitor_N` — competitor search, exogenous to your campaign
+- Weather (temp_avg, precipitation_mm) — always exogenous, validated improvement
+
+**The contamination test:** did the metric change *because of* the promo? If yes, it's endogenous.
+
+**Data provenance requirement:** NEVER use fabricated/synthetic data for experiments. Always fetch real
+data (browser export for Google Trends, API for weather). Add a `.provenance.md` companion file.
+
+### Sale Period Auto-Detection (Coupon Ratio)
+
+If the data contains `transactions_with_coupon` alongside `transactions`, you can auto-detect sale
+periods without client-supplied calendars. The coupon redemption ratio is a **bidirectional** signal:
+
+- **Coupon-based sales** (ratio spikes UP to 0.30–0.42): Promo-code-driven sales (January clearance,
+  spring sale, September sale). Customers redeem codes → ratio rises.
+- **Site-wide sales** (ratio drops DOWN to 0.11–0.17 + volume surge): Blanket discounts (Black Friday,
+  summer sale). Discounts are automatic → fewer code redemptions → ratio falls.
+
+**Detection algorithm:**
+```python
+coupon_ratio = transactions_with_coupon / transactions
+trailing_median = coupon_ratio.rolling(28).median()
+trailing_mad = coupon_ratio.rolling(28).apply(lambda x: np.median(np.abs(x - np.median(x))))
+z = (coupon_ratio - trailing_median) / (1.4826 * trailing_mad)
+
+# Classification
+sale_type = "coupon_sale"   if z > +2.5
+sale_type = "sitewide_sale" if z < -2.5 AND transactions > P25(28-day)
+sale_type = "normal"        otherwise
+```
+
+**Key design choices:**
+- MAD over standard deviation: robust to the very outliers being detected
+- 28-day trailing window: smooths weekly cycles, adapts to seasonal baseline shifts
+- 1.4826 consistency constant normalises MAD to SD-equivalent for normal distributions
+- Volume floor for sitewide detection prevents flagging quiet days with noisy ratios
+
+**Integration:** The `sale_period_detection` enrichment in the webapp produces `sale_type_flag` (binary
+covariate) plus `coupon_ratio_zscore` (continuous). Detected sale periods appear as orange (coupon) /
+purple (sitewide) bands on the validate chart, with warnings when they overlap the treatment window.
+
+**CONTAMINATION WARNING:** When the intervention being tested IS a sale/promotion, `sale_type_flag`
+is contaminated — it absorbs part of the causal effect (validated: p worsened ~2x, effect dropped ~20%).
+Auto-exclude `sale_type_flag` when it overlaps the intervention window.
+Only use it as a covariate for non-sale interventions (e.g., website redesign, pricing change).
+
+**Caution:** Thresholds (z=±2.5) were calibrated on retail data. For other retailers,
+inspect the coupon ratio distribution before trusting default thresholds — if the retailer never uses
+promo codes, the signal won't exist.
 
 ## Step 7: Document
 
@@ -743,10 +795,10 @@ const DATA = {
     // One entry per model specification (typically 6-8)
     best: {
       name: "Recommended spec name",
-      effect: 150000,       // cumulative £
-      daily: 37500,         // daily avg £
+      effect: 297000,       // cumulative £
+      daily: 74250,         // daily avg £
       relative: 22,         // relative % lift
-      pval: 0.04,
+      pval: 0.039,
       probPos: 96.1,
       ciLow: -298000,
       ciHigh: 762000,
@@ -871,15 +923,15 @@ more covariates. In practice, the biggest improvements come from **removing** th
 | Add better covariates (multi-modal holiday intensity) | Addition | -11% CI width |
 | Add exogenous signals (weather) | Addition | -3% CI width |
 
-In the a UK retail engagement, this took p from 0.223 to 0.039 — all from the same data, same model
+In a retail engagement, this took p from 0.223 to 0.039 — all from the same data, same model
 architecture. Three of five improvement steps were subtractions.
 
 **Critical caveat: specification search.** If you test N specifications and report the one with
-the lowest p-value, the result is exploratory, not confirmatory. In the a UK retail engagement, 48
-experiments were conducted. The best spec (p<0.05) was an outlier — all 6 sensitivity specs
+the lowest p-value, the result is exploratory, not confirmatory. In a retail engagement, 48
+experiments were conducted. The best spec (p=0.039) was an outlier — all 6 sensitivity specs
 had p=0.18-0.24. A multi-agent review panel flagged this as the central methodological concern.
 The honest framing is: "The primary specification produces p=0.21. An optimised specification
-achieves p<0.05, but this should be treated as exploratory." See the Claim Framing Guide below.
+achieves p=0.039, but this should be treated as exploratory." See the Claim Framing Guide below.
 
 **Practical workflow:** When p > 0.10, try these in order:
 1. Shorten the pre-period (exclude high-variance events)
@@ -901,22 +953,22 @@ Auditor, Devil's Advocate + Supreme Judge) identified this as the most critical 
 ### What to lead with (in all deliverables)
 
 ```
-"The promo generated an estimated £120-276K in incremental revenue across all 12
+"The promo generated a positive incremental revenue estimate across all 12
 specifications (all positive). When winter sale periods are excluded from training
 (a principled data preparation step), the model achieves formal significance at
-p<0.05 with 95% probability the effect is genuine. The promo drove conversion
-(+14%), not traffic."
+p < 0.05 with ~95% probability the effect is genuine. The promo drove conversion
+(~+14%), not traffic."
 ```
 
 **The masking breakthrough:** When seasonal variance inflates CIs to the point where
 significance is impossible, try masking the high-variance windows (e.g., Nov-Jan for
 retail) rather than truncating the pre-period or cherry-picking model configurations.
 Masking is a data preparation decision, not model tuning — it's more defensible than
-specification search. In a UK retail engagement, masking both winter sale periods
-reduced CI width by 60% (a wide CI → a narrower CI) and moved p from 0.190 to 0.047.
+specification search. In a retail engagement, masking both winter sale periods
+reduced CI width by ~60% and moved p from ~0.19 to < 0.05.
 
 **CRITICAL caveat — masking + tight models can cause overconfident permutation results:**
-In a subsequent validation, the masked spec (p<0.05 BSTS) showed permutation p=0.22
+In a subsequent validation, the masked spec (p=0.047 BSTS) showed permutation p=0.22
 (11/49 random dates produced effects as large as the real promo). ALL specs with
 mask_nov_jan + nseasons=14 showed permutation p > 0.15 — including enriched covariate
 variants (3 to 13 covariates). The masking removes high-variance months, leaving only
@@ -948,7 +1000,7 @@ Never let the headline probability come from an overconfident short pre-period (
 ### What NOT to lead with
 
 ```
-"The promo generated a significant uplift, statistically significant at p < 0.05."
+"The promo generated £XXK, statistically significant at p < 0.05."
 (Unless this was the pre-registered primary specification)
 ```
 
@@ -989,7 +1041,7 @@ A client who reloads the page and sees different numbers will question everythin
 3b. **Claiming significance from specification search** — if you tested N specs and only the
    "best" achieved p < 0.05, the result is exploratory. Bonferroni correction: multiply p by N.
    Lead with the Bayesian posterior across all specs instead. This was the #1 finding from
-   adversarial review of the the client deliverables.
+   adversarial review of the client deliverables.
 
 4. **Too-long pre-periods with structural breaks** — if predictions get worse with more data,
    shorten the pre-period. Find the sweet spot.
@@ -1006,8 +1058,8 @@ A client who reloads the page and sees different numbers will question everythin
 8. **Including high-variance seasonal periods in the pre-period** — For retail clients, the
    Christmas/Black Friday period can inflate credible intervals by 30%+. Test excluding it:
    start the pre-period after Jan 6 (post-Christmas hangover). In the retail case study, this reduced
-   CI width from a wide CI to a narrower CI (-27%) and improved p-value from 0.215 to 0.163 while the
-   effect estimate remained stable (a moderate uplift vs a moderate uplift). Always run a pre-period sensitivity test
+   CI width by ~27% and improved p-value by ~25% while the
+   effect estimate remained stable. Always run a pre-period sensitivity test
    with multiple start dates to find the optimal noise/data tradeoff.
 
 9. **Fake p-values in multi-method pipelines** — When wrapping multiple methods (BSTS, CausalPy,
@@ -1021,7 +1073,7 @@ A client who reloads the page and sees different numbers will question everythin
 
 10. **Probability range inflation via 1-p conversion** — When converting specification-searched
     p-values to "probability of positive effect" (1-p), the bias carries over. If you tested 48
-    specs and the best gave p<0.05, quoting "96% probability" (1-0.039) smuggles the cherry-picked
+    specs and the best gave p=0.039, quoting "96% probability" (1-0.039) smuggles the cherry-picked
     result into a Bayesian-sounding claim. Always derive the probability range from a SYSTEMATIC
     sensitivity rerun. In the retail case study, 16 specs gave p=0.102-0.469, mapping to 53-90% probability.
     The honest range is ~75-90%, not 80-96%.
@@ -1033,7 +1085,7 @@ A client who reloads the page and sees different numbers will question everythin
     Always label exclusions with specific years: "masks Nov-Jan 2024 + 2025 (both years)."
 
 12. **Internal reference docs drifting from deliverable framing** — After a review panel prompts
-    reframing (e.g., from "p<0.05, significant" to "80-90% probability, exploratory"), update the
+    reframing (e.g., from "p=0.039, significant" to "80-90% probability, exploratory"), update the
     internal reference document (ANALYSIS_FINDINGS.md exec summary, narrative sections) in the SAME
     commit as the deliverables. Auditors and new team members read the internal doc first. If it still
     leads with the old framing, the reframing looks cosmetic.
@@ -1085,7 +1137,7 @@ start dates. Report the FULL range and median, not just the best result.
 
 ## Reference: Covariate Correlation Benchmarks
 
-From the a UK retail engagement (UK footwear retail, daily revenue):
+From a retail engagement (retail, daily revenue):
 
 | Covariate | r with Revenue | Notes |
 |---|---|---|
@@ -1104,14 +1156,14 @@ These are benchmarks, not universals — always compute correlations for the spe
 
 ## Reference: Method Selection for Short Campaigns
 
-From the a UK retail engagement — key lessons about which methods work for campaigns under 1 week:
+From a retail engagement — key lessons about which methods work for campaigns under 1 week:
 
 | Method | Result | Key Insight |
 |---|---|---|
 | **BSTS (tfcausalimpact)** | +22%, p=0.21, not significant | Global time series model — daily variance drowns out short effects |
 | **CausalPy (PyMC)** | Consistent, R²=0.72 | Confirms direction but same significance challenge |
-| **RDiT** | **+18.3%, CI [£8K, £71K] — significant** | Local boundary comparison avoids global variance problem |
-| **Conformal CI** | a moderate uplift, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
+| **RDiT** | **~+18%, CI excludes zero — significant** | Local boundary comparison avoids global variance problem |
+| **Conformal CI** | Moderate positive effect, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
 
 **Key strategic insight:** For short campaigns (< 7 days), **RDiT should be the lead method**, not BSTS.
 BSTS is powerful for long interventions where the full time series structure matters, but for short
@@ -1127,14 +1179,14 @@ annual cycles to learn meaningful patterns. Don't add Fourier terms unless the p
 
 ## Reference: Pre-period Start Date Sensitivity
 
-From the a UK retail engagement (UK footwear retail):
+From a retail engagement (retail):
 
 | Start Date | Description | Days | CI Width Impact | p-value |
 |---|---|---|---|---|
-| Oct 2024 | Full data (with Christmas) | 514 | Baseline | 0.215 |
-| Jan 6 2025 | Post-Christmas (recommended) | 417 | -27% | 0.163 |
-| Feb 2025 | Post-winter-sale | 391 | -30% | 0.183 |
-| Mar 2025 | Spring onward | 363 | -31% | 0.161 |
+| Oct start | Full data (with Christmas) | ~500 | Baseline | ~0.22 |
+| Jan 6 start | Post-Christmas (recommended) | ~420 | -27% | ~0.16 |
+| Feb start | Post-winter-sale | ~390 | -30% | ~0.18 |
+| Mar start | Spring onward | ~360 | -31% | ~0.16 |
 
 The sweet spot is usually just after the major seasonal peak — enough data to learn patterns,
 but excluding the period that dominates the variance. For UK retail, Jan 6 (post-Christmas
@@ -1146,18 +1198,18 @@ Truncating the pre-period loses data. An alternative: **mask out** the high-vari
 while keeping the rest. This preserves the full annual cycle (spring-summer-autumn) while
 removing the Christmas noise.
 
-From a UK retail engagement:
+From a retail engagement:
 
 | Approach | Days | Std Dev | CI Width | p-value | Prob+ |
 |---|---|---|---|---|---|
-| Full (no mask) | 514 | a moderate uplift | a wide CI | 0.236 | 76% |
-| Jan 6 2025 start (truncate) | 417 | £210K | £781K | 0.085 | 92% |
-| **Mask BF-Jan 5 both years** | **410** | **£93K** | **£458K** | **0.063** | **94%** |
-| **Mask Nov-Jan both years** | **330** | **£91K** | **a narrower CI** | **0.055** | **95%** |
-| Jan 6 2026 start (too short) | 52 | £39K | £213K | 0.000 | 100% |
+| Full (no mask) | 514 | High | Baseline (wide) | ~0.24 | ~76% |
+| Jan 6 start (truncate) | 417 | Medium | -29% | ~0.09 | ~92% |
+| **Mask BF-Jan 5 both years** | **410** | **Low** | **-58%** | **~0.06** | **~94%** |
+| **Mask Nov-Jan both years** | **330** | **Low** | **-64%** | **~0.05** | **~95%** |
+| Very short start (too short) | 52 | Very low | -81% | ~0.00 | 100% |
 
-Masking BF-Jan 5 keeps 410 days and drops std from a moderate uplift to £93K — better than truncation
-(which keeps 417 days but still has std=£210K because it includes Christmas 2025).
+Masking BF-Jan 5 keeps 410 days and drops std by ~65% — better than truncation
+(which keeps 417 days but retains high std because it includes the second Christmas).
 
 **Warning:** Very short pre-periods (< 60 days) produce overconfident results. If p≈0 and
 CI is 3x tighter than other specs, the model is underestimating uncertainty — not finding a
@@ -1200,13 +1252,13 @@ for drop in base_covs:
     # Run CausalImpact with subset, record p-value and effect
 ```
 
-From a UK retail engagement (5-covariate enhanced bundle, mask_nov_jan):
+From a retail engagement (5-covariate enhanced bundle, mask_nov_jan):
 
 | Dropped | p-value | Effect | Verdict |
 |---|---|---|---|
-| None (full model) | 0.068 | £149K | Baseline |
-| cos_dow | **0.033** | £177K | **Noise — model improves without it** |
-| payday_window_flag | 0.040 | £218K | Marginal — can be dropped |
+| None (full model) | 0.07 | Baseline | Baseline |
+| cos_dow | **0.03** | +19% | **Noise -- model improves without it** |
+| payday_window_flag | 0.04 | +46% | Marginal -- can be dropped |
 | xmas_intensity | 0.055 | — | Helpful but not critical |
 | sin_dow | 0.056 | — | Helpful but not critical |
 | organic_sessions | **0.148** | — | **Critical — model collapses without it** |
