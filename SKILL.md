@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "1.5.0"
+version: "1.6.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -180,10 +180,12 @@ df['sin_dow'] = np.sin(2 * np.pi * df['date'].dt.dayofweek / 7)
 df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 ```
 
-> **Important:** If using tfcausalimpact with `nseasons=7`, the model already captures day-of-week
-> seasonality internally. Adding explicit DoW covariates (sin/cos, dummies, or is_weekend) is
-> redundant and can add noise. Only add DoW covariates when using CausalPy or other models
-> without built-in seasonality.
+> **Important — nseasons determines whether DoW covariates are needed:**
+> - `nseasons=7`: captures day-of-week seasonality internally → DoW covariates are **redundant**
+> - `nseasons=14` (recommended): captures biweekly patterns (payday cycles) but NOT 7-day weekly
+>   patterns → explicit DoW covariate is **needed** (sin_dow or is_weekend)
+>
+> When using CausalPy or other models without built-in seasonality, always include DoW covariates.
 
 #### 3. Holiday intensity (not binary flags)
 Holiday intensity encoding is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
@@ -331,6 +333,18 @@ must set `location="europe-west2"` explicitly — without it, queries fail with
 bq show --format=prettyjson your-project-id:your_dataset | grep location
 ```
 
+### VI Stochasticity Warning
+
+Variational inference (`fit_method="vi"`) is non-deterministic even with a fixed `random_seed`.
+Single-run p-value differences of ±0.04 are noise, not signal. Validated across multiple runs:
+the same spec can range p=0.03–0.08 between runs.
+
+**Practical implications:**
+- **Screening** (p<0.05 vs p>0.10): single VI runs are fine
+- **Definitive A/B comparisons** between covariate encodings: use HMC (`fit_method="hmc"`,
+  deterministic given seed) or average 5+ VI runs
+- Don't make spec recommendations based on single-run differences < 0.03
+
 ### Consensus and Outlier Detection
 
 When aggregating results across methods, use median (not mean) for consensus — it handles
@@ -438,6 +452,38 @@ SENSITIVITY_SPECS = {
 
 If all specs agree on direction, that's strong evidence even if individual p-values are above
 conventional thresholds.
+
+### Specification Curve Analysis (SCA) — full robustness sweep
+
+For publication-quality robustness evidence, run an SCA that exhaustively tests all analytical
+"forking paths." A curated bundle approach is better than full factorial:
+
+**Infrastructure dimension (model structure):**
+- Pre-period modes: full (no mask), full + mask BF/Xmas, full + mask Nov-Jan, post-holiday trimmed
+- Note: masking and trimming are **mutually exclusive** (both solve holiday variance differently)
+- Seasonality: nseasons=7 (weekly) vs 14 (biweekly)
+
+**Enrichment dimension (feature engineering choices):**
+Organize into groups, test head-to-head within each group:
+- **DoW encoding:** none vs sin/cos vs binary weekend vs day dummies
+- **Calendar:** none vs Christmas intensity vs bank holidays vs full (xmas + bank holidays + payday)
+- **Weather:** raw temp/precip vs interaction terms (cold_rain = max(0,-temp)×precip, precip×weekend, precip×sale_intensity)
+- **External signals:** Google Trends category vs brand share vs none
+- **Sale signals:** binary flag vs continuous intensity (z-score) vs both (all zeroed during treatment)
+- **Transforms:** log(target) vs raw, interaction terms
+
+**Key insights from retail SCA:**
+- `sale_intensity` (continuous MAD z-score) is strictly better than binary `sale_type_flag` — it naturally weights major sales (z~5) higher than small promos (z~2.6)
+- Weather interactions encode **consumer behaviour**: `precip × sale_intensity` = "friction × intent" — rain on a major sale kills conversions more than rain on a quiet day
+- Universal facts (bank holidays, paydays) should be auto-detected from dates, not gated behind manual configuration
+- Forward stepwise bundles trace "what does each addition buy?" — often the first 2-3 enrichments capture 80% of the improvement
+- Leave-one-group-out bundles identify "which group matters most?" — usually external signals (Trends) > weather > calendar > DoW
+
+**SCA output should include:**
+1. Spec curve chart: bars sorted by effect size, CI whiskers, colored by significance
+2. Indicator matrix: binary grid showing which choices produced each bar
+3. Dimension impact analysis: per-group average p improvement when included vs excluded
+4. Summary: median effect, IQR, % significant, % positive direction
 
 ## Step 5: Validate
 
@@ -629,21 +675,45 @@ CI excluding zero — consistent with BSTS and RDiT.
 
 ### Contaminated Exogenous Metrics
 
-**Never use Google Trends brand search or sale detection flags as covariates in promo analysis.**
-These metrics are endogenous — the promo itself drives search interest. Using them as covariates absorbs
+**Never use Google Trends brand search as a covariate in promo analysis.**
+Brand search is endogenous — the promo drives search interest. Using it absorbs
 part of the treatment effect, exactly like contaminated paid_sessions (lesson 2).
+Validated: brand search worsened p by ~3x and dropped the effect estimate by ~30%.
 
-Validated with real Google Trends data: adding a brand search index as a covariate worsened p by ~3x
-and dropped the effect estimate by ~30%. Similarly, `sale_type_flag` worsened p by ~2x when the
-intervention IS a sale (the flag captures the campaign itself).
+**Sale detection flags CAN be used — but must be zeroed during the treatment window.**
+When the intervention IS a sale/promo, `sale_type_flag` captures the campaign itself. The fix:
+zero sale covariates during the treatment window so the model only learns from *historical* sale
+patterns. Validated: unzeroed sale_type_flag worsened p ~2x (0.039→0.074), but zeroed binary +
+continuous signals combined achieved p=0.033 (better than baseline p=0.046). Implementation:
+`prep_df(treatment_s=..., treatment_e=..., zero_treatment_cols=["sale_type_flag", "sale_intensity"])`.
+
+**Two complementary sale signals (test both together):**
+- `sale_type_flag` (binary: is there a sale?) — marginal alone
+- `sale_intensity` (continuous: absolute coupon-ratio z-score) — marginal alone
+- **Combined: p=0.033** — best BSTS p-value outside Google Trends
+
+**The best exogenous search signal: category-level Google Trends at daily resolution.**
+- Use a generic category term (e.g., "shoes" for a shoe retailer) — NOT the brand name
+- Download daily data in 9 overlapping ~75-day chunks and cross-normalize (weekly interpolated adds nothing)
+- Include BOTH daily AND weekly as dual-frequency signal — daily captures within-week demand pulses, weekly provides stable trend backbone
+- Validated: dual-frequency category search achieved ~6.5x p-value improvement over baseline
+
+**The Correlation Paradox — counterintuitive but validated across 16 experiments:**
+- Competitor brand search has HIGH revenue correlation (~0.6-0.7) but HURTS the model — it's redundant with existing BSTS components (seasonality, weekly cycles)
+- Category search has NEAR-ZERO revenue correlation (~0.01) but is the BEST covariate — it provides genuinely new daily variation the model can use
+- Good BSTS covariates need: low revenue correlation + high daily variation (autocorr <0.8) + exogeneity
+- Dual-frequency only works for orthogonal signals (r<0.1). For correlated signals (r>0.3), it WORSENS results
+
+**DO NOT use as covariates:**
+- `trend_brand_share` (brand / total) — 0.93 correlation with contaminated brand search, hurts in combos
+- Competitor brand search — correlation paradox (redundant with model, even at daily resolution)
 
 **Safe exogenous alternatives:**
-- `trend_brand_share` (brand / brand+competitors) — relative metric, partially cancels campaign effect
-- `trend_category` (e.g., "buy shoes online") — market-level demand, exogenous to specific brand
-- `trend_competitor_N` — competitor search, exogenous to your campaign
+- Category-level Google Trends (daily stitched + weekly dual-frequency) — strongest covariate found
 - Weather (temp_avg, precipitation_mm) — always exogenous, validated improvement
 
 **The contamination test:** did the metric change *because of* the promo? If yes, it's endogenous.
+For sale flags: zero during treatment window rather than excluding entirely — the pre-period signal is valuable.
 
 **Data provenance requirement:** NEVER use fabricated/synthetic data for experiments. Always fetch real
 data (browser export for Google Trends, API for weather). Add a `.provenance.md` companion file.
@@ -677,18 +747,47 @@ sale_type = "normal"        otherwise
 - 1.4826 consistency constant normalises MAD to SD-equivalent for normal distributions
 - Volume floor for sitewide detection prevents flagging quiet days with noisy ratios
 
-**Integration:** The `sale_period_detection` enrichment in the webapp produces `sale_type_flag` (binary
-covariate) plus `coupon_ratio_zscore` (continuous). Detected sale periods appear as orange (coupon) /
-purple (sitewide) bands on the validate chart, with warnings when they overlap the treatment window.
+**Integration:** Two enrichments in the webapp:
+1. `sale_period_detection` → `sale_type_flag` (binary: is it a sale?)
+2. `sale_intensity` → `sale_intensity` (continuous: absolute z-score during sales)
 
-**CONTAMINATION WARNING:** When the intervention being tested IS a sale/promotion, `sale_type_flag`
-is contaminated — it absorbs part of the causal effect (validated: p worsened ~2x, effect dropped ~20%).
-Auto-exclude `sale_type_flag` when it overlaps the intervention window.
-Only use it as a covariate for non-sale interventions (e.g., website redesign, pricing change).
+Detected sale periods appear as orange (coupon) / purple (sitewide) bands on the validate chart.
+
+**Treatment-window zeroing (ADR 0020):** Both sale covariates are automatically zeroed during the
+treatment window via `prep_df()` to prevent contamination when the intervention IS a sale/promo.
+The model learns "when sales happened historically, revenue was higher" but doesn't attribute
+the current intervention's uplift to "it's a sale." Validated: unzeroed p=0.074, zeroed combined p=0.033.
+
+**Best practice:** Always include BOTH signals together (binary + continuous). Individual signals are
+marginal alone (p~0.052), but combined they're complementary (p=0.033). The binary captures "is it a
+sale?" while intensity captures "how strong?" — different information for the model.
 
 **Caution:** Thresholds (z=±2.5) were calibrated on retail data. For other retailers,
 inspect the coupon ratio distribution before trusting default thresholds — if the retailer never uses
 promo codes, the signal won't exist.
+
+### Tiered Covariate Recommendation (validated via permutation tests)
+
+When external data sources are available, offer the analysis in tiers. Each tier is permutation-validated
+(50 shuffles, perm p < 0.10 gatekeeper):
+
+| Tier | Covariates | Data Requirements | Permutation | When to Use |
+|---|---|---|---|---|
+| **Default** | ~5 base covariates (sessions, DoW, holiday intensity, weather) | Internal data only | perm p ~0.06 | Always — the safe starting point |
+| **Enhanced** | Default + dual-frequency category search (daily + weekly) | + Google Trends CSV | perm p ~0.04 | When Google Trends data is available for the product category |
+| **Full** | Enhanced + sale detection signals (binary + continuous, zeroed) | + Coupon/transaction data | perm p ~0.08 | When coupon data is available AND the intervention is a sale/promo |
+
+**Key findings from tiered validation:**
+- Sale signals alone fail permutation (perm p ~0.14) — they lack standalone robustness
+- Combined with category search trends, sale signals pass (perm p ~0.08) — complementary not standalone
+- Combining orthogonal signal families (search trends + sale patterns) narrows credible intervals
+  more than it improves p-values. The combination often yields entirely positive CI lower bounds,
+  which is more defensible for client claims than a lower p-value with CI crossing zero
+- "We're ~99% confident the effect is positive and at least £X" beats "p=0.008 but could be negative"
+
+**No hard covariate cap.** The BSTS horseshoe prior handles many covariates via shrinkage. If a
+9-covariate spec passes the 50-shuffle permutation test, the feature count doesn't matter. Use
+permutation p < 0.10 as the gatekeeper, not an arbitrary covariate budget.
 
 ## Step 7: Document
 
