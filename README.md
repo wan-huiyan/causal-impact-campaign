@@ -1,6 +1,6 @@
 # Causal Impact Campaign
 
-A [Claude Code](https://claude.com/claude-code) skill that measures the causal impact of an intervention on a time series metric using Bayesian structural time series — with dual-method validation, interactive HTML explorers, and client-ready deliverables.
+A [Claude Code](https://claude.com/claude-code) skill that measures the causal impact of an intervention on a time series metric using Bayesian structural time series — with 9-method validation, Specification Curve Analysis (440-spec robustness sweep), permutation testing, and client-ready deliverables.
 
 ![Demo output — causal impact analysis summary](docs/demo-output.png)
 *Example output: policy impact summary with dual-method agreement, key modelling decisions, and validation checks.*
@@ -78,10 +78,11 @@ This skill constructs a Bayesian counterfactual ("what would have happened witho
 | 1. Explore | Understand the intervention, check date ranges, identify covariates |
 | 2. Engineer | Cyclical day-of-week, multi-modal holiday intensity, weather, paid/organic splits |
 | 3. Safety Audit | Flag covariates correlated with the intervention (they absorb causal effect) |
-| 4. Dual Analysis | Run both tfcausalimpact (BSTS) and CausalPy (RDiT/ITS) for robustness |
-| 5. Validate | Rolling backtests, placebo tests, sensitivity analysis, automated scorecard |
-| 6. Interpret | Client-ready narrative with honest uncertainty communication |
-| 7. Deliver | Interactive HTML explorer + slide deck + scrolling report |
+| 4. Multi-Method | Run 9 methods: 4 BSTS variants, RDiT, CausalPy, Conformal, Prophet |
+| 5. SCA Sweep | 440-spec Specification Curve Analysis: 55 covariate bundles x 8 infra combos |
+| 6. Validate | Permutation tests (50-500 shuffles), rolling backtests, placebo tests |
+| 7. Interpret | Client-ready narrative with honest uncertainty communication |
+| 8. Deliver | Interactive HTML explorer + spec curve chart + standalone report |
 
 ## The Journey: p~0.22 to p<0.05
 
@@ -133,6 +134,26 @@ The client explores robustness themselves rather than trusting a static summary.
 
 ![Interactive explorer — model specification selector with live-updating metrics and Plotly.js counterfactual chart](docs/demo-interactive.png)
 
+## Specification Curve Analysis (SCA)
+
+For publication-quality robustness evidence, the skill runs a **440-spec SCA** that exhaustively tests all analytical "forking paths" — not just model choices but feature engineering choices too.
+
+**Infrastructure sweep (8 combos):** 4 pre-period modes (full, mask BF-Jan, mask Nov-Jan, post-holiday trimmed) x 2 seasonality (weekly, biweekly). Masking and trimming are mutually exclusive.
+
+**Enrichment sweep (55 curated bundles in 6 groups):**
+- **DoW encoding:** none, sin/cos, binary weekend, day dummies (5 options)
+- **Calendar:** none, Christmas intensity, bank holidays, payday window (5 options)
+- **Weather:** raw, self-interactions (cold_rain), day-type interactions, sale-intensity interactions (6 options)
+- **External signals:** Google Trends category, brand share (4 options)
+- **Sale signals:** binary flag, continuous intensity, both (4 options)
+- **Transforms:** log target, payday x weekend interaction (4 options)
+
+**Bundle strategies:** Forward stepwise (what does each addition buy?), leave-one-group-out (which group matters most?), head-to-head within groups (which variant is best?), validated specs (consistency check), kitchen sink (extremes).
+
+**Output:** Spec curve chart (440 bars sorted by effect, CI whiskers, significance coloring), indicator matrix, dimension impact analysis (per-group average p improvement), and forward stepwise path chart.
+
+The SCA replaces "we found p<0.05" with "across 440 specifications, the median effect is +X (IQR: Y to Z), N% show significance at p<0.05, and 100% agree on direction."
+
 ## Key Techniques Explored
 
 ### What worked
@@ -173,8 +194,12 @@ The client explores robustness themselves rather than trusting a static summary.
 - **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks
 - **RDiT beats BSTS for short interventions** — local boundary comparison achieves significance where global BSTS can't
 - **Conformal CIs are 61% tighter than Bayesian** — distribution-free uncertainty as a sanity check
-- **nseasons=7 makes explicit DoW covariates redundant** — sin/cos added noise, not signal
-- **Cloud Run for parallel BSTS** — 12 specs in ~15 min vs 60+ min sequential, ~$0.50 total
+- **nseasons=7 makes DoW redundant, but nseasons=14 needs it** — sin/cos is redundant with weekly seasonality but essential with biweekly
+- **Cloud Run for parallel BSTS** — 440 specs in ~6 min vs hours sequential, ~$0.50 total
+- **Continuous sale intensity > binary flag** — MAD z-scores naturally weight major sales (z~5) higher than small promos (z~2.6)
+- **Weather interactions encode consumer behaviour** — `precip x sale_intensity` = "friction x intent"
+- **Masking and trimming are mutually exclusive** — both solve holiday variance, don't cross them in a sweep
+- **SCA bundles should be curated, not full factorial** — 55 representative bundles answer more questions than 9,600 random combinations
 
 ## Limitations
 
