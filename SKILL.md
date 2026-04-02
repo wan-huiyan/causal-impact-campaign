@@ -35,6 +35,7 @@ error_handling: |
   - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
   - If methods disagree on direction, report both results honestly with interpretation guidance
   - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
+  - If CausalPy fails with xarray "Dimension(s) 'draw', 'chain' do not exist" on short treatment windows (<7 days), skip CausalPy and use RDiT as lead method. CausalPy ITS requires more post-period data.
 idempotency: |
   Re-running the analysis with the same data and parameters produces the same estimates
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
@@ -744,235 +745,17 @@ comes from honesty, not from overselling.
 
 ## Step 6b: Extension Analyses
 
-After the primary analysis, run these extensions to deepen the insight:
+> **Full details:** See [references/extension_analyses.md](references/extension_analyses.md)
 
-### Effect Decomposition
-
-Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
-**which lever the campaign pulled** — was it conversion, basket size, or traffic?
-
-In one retail engagement: conversion rate showed the strongest signal (+17%, 87% probability
-positive) while AOV barely moved (+0.6%). Transactions and revenue rose proportionally (+27-28%).
-This "conversion barrier removal" pattern told us the promo made hesitant shoppers buy —
-it didn't attract new visitors or increase basket size. This insight directly informed
-the client's next promotional strategy.
-
-**Client-friendly framing:** Use `prob_positive = 1 - p` (as a percentage) instead of raw
-p-values. "87% probability the effect is positive" resonates far better with business
-stakeholders than "p=0.133". Show this as a stat card and table column alongside p-values.
-
-This metric is formally called the "Probability of Direction" (pd) in the Bayesian literature
-[Makowski et al., 2019] and is exactly the "Posterior prob. of a causal effect" that CausalImpact
-reports in its summary output [Brodersen et al., 2015]. Under uniform priors, the one-sided
-frequentist p-value equals the posterior probability mass below zero [Marsman & Wagenmakers, 2016],
-so 1-p is a mathematically grounded Bayesian metric, not an informal conversion. The clinical
-trials literature consistently recommends posterior probabilities over p-values for non-technical
-stakeholders [Muehlemann et al., 2023; Ruberg, 2021].
-
-**Caution with flat priors:** Gelman & Yao [2021] warn that Pr(effect > 0) can overstate certainty
-when priors are flat/uninformative. CausalImpact uses spike-and-slab priors (regularizing), making
-this metric more defensible than it would be under flat priors. Still, always derive probability
-ranges from systematic sensitivity reruns, not cherry-picked specs (see Pitfall 10).
-
-This is often the most valuable insight for the client — it informs future offer design.
-
-### Channel Split
-
-Run CausalImpact on `paid_revenue` and `organic_revenue` separately to see if the campaign
-affected all channels or just one. Use `organic_sessions` as control for both (don't use
-`paid_sessions` as control for paid revenue — endogeneity risk).
-
-If both channels lift proportionally, it's a site-wide conversion effect. If only paid lifts,
-the campaign may be driving traffic rather than conversion.
-
-### Post-Promo Persistence
-
-Run CausalImpact with the full post-period (intervention start → data end) instead of just the
-promo window. Compare average daily effect during promo vs after promo:
-
-```
-persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
-```
-
-- Ratio > 50%: Significant persistence — report total impact including post-period
-- Ratio 10-50%: Partial persistence — mention as additional upside
-- Ratio < 10%: Effect dissipated — report promo-period only
-
-**Warning:** Persistence analysis is unreliable for short campaigns. In one engagement with
-clean covariates (A2.4 spec), the persistence ratio was 44% — effect partially persisted but
-diminished. However, previous analyses with contaminated covariates showed ratios from 55%
-to 188% (clearly artefacts). The key learning: persistence estimates are highly sensitive to
-covariate choice. Use clean covariates and interpret conservatively.
-Frame persistence as "inconclusive" unless multiple specs agree and the extended post-period is plausible.
-
-### Weather Covariate
-
-For retail/ecommerce clients, add daily temperature and precipitation as covariates.
-Source: [Open-Meteo API](https://open-meteo.com/) — free, no API key needed.
-
-```python
-# Fetch via curl (bypass corporate SSL proxies) or requests
-import requests
-resp = requests.get("https://archive-api.open-meteo.com/v1/archive", params={
-    "latitude": 51.5074, "longitude": -0.1278,  # London
-    "start_date": "2024-10-01", "end_date": "2026-03-15",
-    "daily": "temperature_2m_mean,precipitation_sum",
-    "timezone": "Europe/London",
-})
-```
-
-Weather typically has low standalone correlation with revenue (r ≈ -0.05 to +0.03) but provides
-an orthogonal exogenous signal that can tighten credible intervals by 2-5%. Worth including when
-available, but not transformative.
-
-**Why weather matters for retail:** Rain/cold drives online purchasing (people stay home). For
-retail specifically, seasonal patterns (boots in autumn, sandals in spring) correlate with
-temperature.
-
-**SSL note:** Corporate proxies may block the Open-Meteo API. Use `curl -sk` to bypass, or
-`requests.get(..., verify=False)`.
-
-### Prophet Cross-Validation
-
-For high-stakes claims, run Facebook Prophet as an independent cross-validation method. Prophet
-uses additive decomposition (Fourier seasonality + changepoint trend) — a fundamentally different
-model family from BSTS (structural time series + state space). Agreement on both direction AND
-magnitude across model families is much more convincing than multiple specs within the same model.
-
-```python
-from prophet import Prophet
-import logging
-logging.getLogger("prophet").setLevel(logging.WARNING)
-logging.getLogger("cmdstanpy").setLevel(logging.WARNING)
-
-m = Prophet(daily_seasonality=False, weekly_seasonality=True, yearly_seasonality=True)
-m.add_regressor("organic_sessions")  # add key exogenous regressors
-m.fit(train_df)  # pre-period only, columns: ds, y, organic_sessions
-forecast = m.predict(future_df)  # post-period dates + regressor values
-# Effect = actual - yhat; CI from yhat_lower/yhat_upper
-```
-
-Prophet does not produce a frequentist p-value. Report as "CI excludes zero" if
-`actual_sum - yhat_upper_sum > 0`. In one retail case study, Prophet showed a moderate positive effect with
-CI excluding zero — consistent with BSTS and RDiT.
-
-### Contaminated Exogenous Metrics
-
-**Never use Google Trends brand search as a covariate in promo analysis.**
-Brand search is endogenous — the promo drives search interest. Using it absorbs
-part of the treatment effect, exactly like contaminated paid_sessions (lesson 2).
-Validated: brand search worsened p by ~3x and dropped the effect estimate by ~30%.
-
-**Sale detection flags CAN be used — but must be zeroed during the treatment window.**
-When the intervention IS a sale/promo, `sale_type_flag` captures the campaign itself. The fix:
-zero sale covariates during the treatment window so the model only learns from *historical* sale
-patterns. Validated: unzeroed sale_type_flag worsened p ~2x (0.039→0.074), but zeroed binary +
-continuous signals combined achieved p=0.033 (better than baseline p=0.046). Implementation:
-`prep_df(treatment_s=..., treatment_e=..., zero_treatment_cols=["sale_type_flag", "sale_intensity"])`.
-
-**Two complementary sale signals (test both together):**
-- `sale_type_flag` (binary: is there a sale?) — marginal alone
-- `sale_intensity` (continuous: absolute coupon-ratio z-score) — marginal alone
-- **Combined: p=0.033** — best BSTS p-value outside Google Trends
-
-**The best exogenous search signal: category-level Google Trends at daily resolution.**
-- Use a generic category term (e.g., "shoes" for a shoe retailer) — NOT the brand name
-- Download daily data in 9 overlapping ~75-day chunks and cross-normalize (weekly interpolated adds nothing)
-- Include BOTH daily AND weekly as dual-frequency signal — daily captures within-week demand pulses, weekly provides stable trend backbone
-- Validated: dual-frequency category search achieved ~6.5x p-value improvement over baseline
-
-**The Correlation Paradox — counterintuitive but validated across 16 experiments:**
-- Competitor brand search has HIGH revenue correlation (~0.6-0.7) but HURTS the model — it's redundant with existing BSTS components (seasonality, weekly cycles)
-- Category search has NEAR-ZERO revenue correlation (~0.01) but is the BEST covariate — it provides genuinely new daily variation the model can use
-- Good BSTS covariates need: low revenue correlation + high daily variation (autocorr <0.8) + exogeneity
-- Dual-frequency only works for orthogonal signals (r<0.1). For correlated signals (r>0.3), it WORSENS results
-
-**DO NOT use as covariates:**
-- `trend_brand_share` (brand / total) — 0.93 correlation with contaminated brand search, hurts in combos
-- Competitor brand search — correlation paradox (redundant with model, even at daily resolution)
-
-**Safe exogenous alternatives:**
-- Category-level Google Trends (daily stitched + weekly dual-frequency) — strongest covariate found
-- Weather (temp_avg, precipitation_mm) — always exogenous, validated improvement
-
-**The contamination test:** did the metric change *because of* the promo? If yes, it's endogenous.
-For sale flags: zero during treatment window rather than excluding entirely — the pre-period signal is valuable.
-
-**Data provenance requirement:** NEVER use fabricated/synthetic data for experiments. Always fetch real
-data (browser export for Google Trends, API for weather). Add a `.provenance.md` companion file.
-
-### Sale Period Auto-Detection (Coupon Ratio)
-
-If the data contains `transactions_with_coupon` alongside `transactions`, you can auto-detect sale
-periods without client-supplied calendars. The coupon redemption ratio is a **bidirectional** signal:
-
-- **Coupon-based sales** (ratio spikes UP to 0.30–0.42): Promo-code-driven sales (January clearance,
-  spring sale, September sale). Customers redeem codes → ratio rises.
-- **Site-wide sales** (ratio drops DOWN to 0.11–0.17 + volume surge): Blanket discounts (Black Friday,
-  summer sale). Discounts are automatic → fewer code redemptions → ratio falls.
-
-**Detection algorithm:**
-```python
-coupon_ratio = transactions_with_coupon / transactions
-trailing_median = coupon_ratio.rolling(28).median()
-trailing_mad = coupon_ratio.rolling(28).apply(lambda x: np.median(np.abs(x - np.median(x))))
-z = (coupon_ratio - trailing_median) / (1.4826 * trailing_mad)
-
-# Classification
-sale_type = "coupon_sale"   if z > +2.5
-sale_type = "sitewide_sale" if z < -2.5 AND transactions > P25(28-day)
-sale_type = "normal"        otherwise
-```
-
-**Key design choices:**
-- MAD over standard deviation: robust to the very outliers being detected
-- 28-day trailing window: smooths weekly cycles, adapts to seasonal baseline shifts
-- 1.4826 consistency constant normalises MAD to SD-equivalent for normal distributions
-- Volume floor for sitewide detection prevents flagging quiet days with noisy ratios
-
-**Integration:** Two enrichments in the webapp:
-1. `sale_period_detection` → `sale_type_flag` (binary: is it a sale?)
-2. `sale_intensity` → `sale_intensity` (continuous: absolute z-score during sales)
-
-Detected sale periods appear as orange (coupon) / purple (sitewide) bands on the validate chart.
-
-**Treatment-window zeroing (ADR 0020):** Both sale covariates are automatically zeroed during the
-treatment window via `prep_df()` to prevent contamination when the intervention IS a sale/promo.
-The model learns "when sales happened historically, revenue was higher" but doesn't attribute
-the current intervention's uplift to "it's a sale." Validated: unzeroed p=0.074, zeroed combined p=0.033.
-
-**Best practice:** Always include BOTH signals together (binary + continuous). Individual signals are
-marginal alone (p~0.052), but combined they're complementary (p=0.033). The binary captures "is it a
-sale?" while intensity captures "how strong?" — different information for the model.
-
-**Caution:** Thresholds (z=±2.5) were calibrated on retail data. For other retailers,
-inspect the coupon ratio distribution before trusting default thresholds — if the retailer never uses
-promo codes, the signal won't exist.
-
-### Tiered Covariate Recommendation (validated via permutation tests)
-
-When external data sources are available, offer the analysis in tiers. Each tier is permutation-validated
-(50 shuffles, perm p < 0.10 gatekeeper):
-
-| Tier | Covariates | Data Requirements | Permutation | When to Use |
-|---|---|---|---|---|
-| **Default** | ~5 base covariates (sessions, DoW, holiday intensity, weather) | Internal data only | perm p ~0.06 | Always — the safe starting point |
-| **Enhanced** | Default + dual-frequency category search (daily + weekly) | + Google Trends CSV | perm p ~0.04 | When Google Trends data is available for the product category |
-| **Full** | Enhanced + sale detection signals (binary + continuous, zeroed) | + Coupon/transaction data | perm p ~0.08 | When coupon data is available AND the intervention is a sale/promo |
-
-**Key findings from tiered validation:**
-- Sale signals alone fail permutation (perm p ~0.14) — they lack standalone robustness
-- Combined with category search trends, sale signals pass (perm p ~0.08) — complementary not standalone
-- Combining orthogonal signal families (search trends + sale patterns) narrows credible intervals
-  more than it improves p-values. The combination often yields entirely positive CI lower bounds,
-  which is more defensible for client claims than a lower p-value with CI crossing zero
-- "We're ~99% confident the effect is positive and at least £X" beats "p=0.008 but could be negative"
-
-**No hard covariate cap.** The BSTS spike-and-slab prior handles many covariates via shrinkage
-[Scott & Varian, 2014]. If a 9-covariate spec passes the 50-shuffle permutation test, the
-feature count doesn't matter. Use permutation p < 0.10 as the gatekeeper, not an arbitrary
-covariate budget. However, with a weak "expected model size" prior and a short pre-period,
-the spike-and-slab may retain noisy regressors that inflate FPR [Oelrich et al., 2020].
+Key extensions after the primary analysis:
+- **Effect decomposition:** Run CausalImpact on conversion_rate, aov, transactions separately to identify which lever the campaign pulled
+- **Channel split:** Separate paid_revenue vs organic_revenue to detect site-wide vs channel-specific effects
+- **Post-promo persistence:** Compare during-promo vs after-promo daily effects (persistence_ratio)
+- **Weather covariate:** Open-Meteo API for temperature/precipitation (orthogonal exogenous signal, ~2-5% CI tightening)
+- **Prophet cross-validation:** Independent model family for high-stakes claims
+- **Contaminated exogenous metrics:** Brand search is endogenous; use category-level Trends instead. Sale flags must be zeroed during treatment window (ADR 0020)
+- **Sale auto-detection:** Coupon ratio bidirectional signal with MAD z-score
+- **Tiered covariates:** Default (5 base) → Enhanced (+Trends) → Full (+sale signals), each permutation-validated
 
 ## Step 7: Document
 
@@ -1419,238 +1202,34 @@ Then generate: minimal (1 session covariate), calendar-only, seasonality-only,
 calendar+seasonality, full, without-paid, kitchen-sink. Test across 2+ pre-period
 start dates. Report the FULL range and median, not just the best result.
 
-## Reference: Covariate Correlation Benchmarks
+## Reference Sections
 
-From a retail engagement (retail, daily revenue):
+> **Full details:** See [references/benchmarks_and_methods.md](references/benchmarks_and_methods.md)
 
-| Covariate | r with Revenue | Notes |
-|---|---|---|
-| paid_sessions | +0.885 | Strong but check intervention safety |
-| organic_sessions | +0.863 | Usually the safest control |
-| xmas_intensity | +0.828 | Multi-modal v2 (BF spike + gift shopping + Boxing Day) |
-| kcp_period_flag | +0.523 | Key consumption period |
-| payday_window_flag | +0.213 | 25th–3rd spending window |
-| holiday_flag | +0.153 | Named public holidays |
-| paid_share | +0.140 | Media intensity ratio |
-| payday_x_weekend | +0.123 | Interaction term |
-| sin_dow / cos_dow | -0.078 / +0.004 | Low standalone but captures weekly cycle in model |
-| winter_sale_flag | -0.024 | Near-zero — binary flag is inadequate for retail peaks |
+Key reference material (covariate benchmarks, method selection tables, pre-period sensitivity,
+leave-one-out analysis, Cloud Run batch setup) has been moved to reference files to keep the
+main skill focused on the pipeline steps. Quick pointers:
 
-These are benchmarks, not universals — always compute correlations for the specific client.
-
-## Reference: Method Selection for Short Campaigns
-
-From a retail engagement — key lessons about which methods work for campaigns under 1 week:
-
-| Method | Result | Key Insight |
-|---|---|---|
-| **BSTS (tfcausalimpact)** | +22%, p=0.21, not significant | Global time series model — daily variance drowns out short effects |
-| **CausalPy (PyMC)** | Consistent, R²=0.72 | Confirms direction but same significance challenge |
-| **RDiT** | **~+18%, CI excludes zero — significant** | Local boundary comparison avoids global variance problem |
-| **Conformal CI** | Moderate positive effect, CI 61% tighter than Bayesian | Distribution-free — doesn't depend on model specification |
-
-**Key strategic insight:** For short campaigns (< 7 days), **RDiT should be the lead method**, not BSTS.
-BSTS is powerful for long interventions where the full time series structure matters, but for short
-campaigns the global variance dominates. RDiT focuses only on the local discontinuity at the boundary,
-sidestepping the noise problem entirely. Use BSTS as a supporting method for the full counterfactual
-decomposition, and RDiT for the significance claim.
-
-**Conformal intervals** should always be run alongside Bayesian CIs. They were 61% tighter in a retail
-case — a dramatic improvement. Use the pre-period residual quantile approach: `np.quantile(np.abs(residuals), 0.95)`.
-
-**Fourier seasonality (k=1..4):** Did NOT help with ~17 months of data (+0.9% CI width). Requires 2+ full
-annual cycles to learn meaningful patterns. Don't add Fourier terms unless the pre-period spans 2+ years.
-
-## Reference: Pre-period Start Date Sensitivity
-
-From a retail engagement (retail):
-
-| Start Date | Description | Days | CI Width Impact | p-value |
-|---|---|---|---|---|
-| Oct start | Full data (with Christmas) | ~500 | Baseline | ~0.22 |
-| Jan 6 start | Post-Christmas (recommended) | ~420 | -27% | ~0.16 |
-| Feb start | Post-winter-sale | ~390 | -30% | ~0.18 |
-| Mar start | Spring onward | ~360 | -31% | ~0.16 |
-
-The sweet spot is usually just after the major seasonal peak — enough data to learn patterns,
-but excluding the period that dominates the variance. For UK retail, Jan 6 (post-Christmas
-hangover) is a reliable default.
-
-### Advanced: Masking high-variance periods instead of truncating
-
-Truncating the pre-period loses data. An alternative: **mask out** the high-variance windows
-while keeping the rest. This preserves the full annual cycle (spring-summer-autumn) while
-removing the Christmas noise.
-
-From a retail engagement:
-
-| Approach | Days | Std Dev | CI Width | p-value | Prob+ |
-|---|---|---|---|---|---|
-| Full (no mask) | 514 | High | Baseline (wide) | ~0.24 | ~76% |
-| Jan 6 start (truncate) | 417 | Medium | -29% | ~0.09 | ~92% |
-| **Mask BF-Jan 5 both years** | **410** | **Low** | **-58%** | **~0.06** | **~94%** |
-| **Mask Nov-Jan both years** | **330** | **Low** | **-64%** | **~0.05** | **~95%** |
-| Very short start (too short) | 52 | Very low | -81% | ~0.00 | 100% |
-
-Masking BF-Jan 5 keeps 410 days and drops std by ~65% — better than truncation
-(which keeps 417 days but retains high std because it includes the second Christmas).
-
-**Warning:** Very short pre-periods (< 60 days) produce overconfident results. If p≈0 and
-CI is 3x tighter than other specs, the model is underestimating uncertainty — not finding a
-stronger signal. The Jan 6 2026 spec (52 days) should always carry a caveat.
-
-**Temporal scope verification (critical):** When masking or excluding seasonal periods, count
-how many instances exist in your date range and verify ALL are handled. Common mistake: "Jan 6
-pre-period start" was labeled "excludes Christmas" but only excluded Christmas 2024 — Christmas
-2025 was still in the 14-month training window. Three rounds of adversarial review (12 reviewers)
-missed this; the analyst caught it 6 days later. Always label specs precisely: "excludes Christmas
-2024 only" vs "masks Christmas 2024 + 2025 (both years)."
-
-```python
-# Verify temporal scope: count instances before masking
-import pandas as pd
-for event_name, month_start, month_end in [('Christmas/winter', 11, 1)]:
-    instances = []
-    for year in df.index.year.unique():
-        mask = (df.index >= f'{year}-{month_start:02d}-01') & (df.index <= f'{year+1}-{month_end:02d}-31')
-        if mask.any():
-            instances.append(year)
-    print(f"{event_name}: {len(instances)} instances in data ({instances})")
-    # Ensure your masking covers ALL instances, not just the first
-```
-
-**Implementation:** Drop masked dates from the DataFrame before passing to CausalImpact:
-```python
-for start, end in [('2024-11-01', '2025-01-31'), ('2025-11-01', '2026-01-31')]:
-    df = df.loc[~((df.index >= start) & (df.index <= end))]
-```
-
-## Reference: Leave-One-Out Covariate Sensitivity
-
-After finding the best covariate bundle, run leave-one-out to identify noise contributors:
-
-```python
-base_covs = ['organic_sessions', 'sin_dow', 'cos_dow', 'xmas_intensity', 'payday_window_flag']
-for drop in base_covs:
-    subset = [c for c in base_covs if c != drop]
-    # Run CausalImpact with subset, record p-value and effect
-```
-
-From a retail engagement (5-covariate enhanced bundle, mask_nov_jan):
-
-| Dropped | p-value | Effect | Verdict |
-|---|---|---|---|
-| None (full model) | 0.07 | Baseline | Baseline |
-| cos_dow | **0.03** | +19% | **Noise -- model improves without it** |
-| payday_window_flag | 0.04 | +46% | Marginal -- can be dropped |
-| xmas_intensity | 0.055 | — | Helpful but not critical |
-| sin_dow | 0.056 | — | Helpful but not critical |
-| organic_sessions | **0.148** | — | **Critical — model collapses without it** |
-
-**Key insight:** More covariates is not always better. cos_dow was adding noise because nseasons=7
-already captures weekly seasonality internally (see Lesson 7). The pruned model (4 covariates)
-outperformed the full model (5 covariates).
-
-## Reference: Cloud Run for Batch BSTS Runs
-
-Running 12+ BSTS specs locally can take 60+ min. Use Cloud Run Jobs for parallel execution:
-
-1. **Containerize** the single-spec runner (tfcausalimpact + pandas + google-cloud-storage)
-2. **Upload data** to GCS (features CSV + weather CSV)
-3. **Launch all specs** with `--async` — each runs independently on 2 vCPU + 4GB
-4. **Collect results** from GCS when all complete
-
-Key settings:
-- `--task-timeout=1800s` (NOT 600s — longer pre-periods take 15-20 min for 6 BSTS models)
-- `--memory=4Gi --cpu=2` for tfcausalimpact
-- Pass spec key via `SPEC_KEY` env var, data location via `GCS_BUCKET`
-
-Typical cost: ~$0.50 for 12 parallel specs. Completes in ~15 min vs 60+ min sequential.
+- **Covariate benchmarks:** organic_sessions (r=0.86) is the safest control; paid_sessions (r=0.89) requires contamination check
+- **Short campaigns:** RDiT is the lead method for <7 day campaigns; conformal CIs are 61% tighter than Bayesian
+- **Pre-period sensitivity:** Jan 6 post-Christmas start is a reliable UK retail default (-27% CI width)
+- **Masking vs truncating:** Mask BF-Jan 5 both years achieves -58% CI width; always verify temporal scope
+- **Leave-one-out:** More covariates is not always better; test by dropping each one
 
 ## Reference: Environment & Dependency Gotchas
 
-### numpy version conflict (tfcausalimpact vs CausalPy)
+> **Full details:** See [references/environment_gotchas.md](references/environment_gotchas.md)
 
-These two packages **cannot coexist** in the same Python environment:
-
-| Package | numpy | pandas | Notes |
-|---|---|---|---|
-| `tfcausalimpact` | < 2.0 | <= 2.2 | TensorFlow 2.16 needs numpy 1.x |
-| `CausalPy` | >= 2.0 | >= 3.0 | PyMC/PyTensor needs numpy 2.x |
-
-**Workflow:** Run tfcausalimpact first (numpy<2), then `pip install "numpy>=2"`, then run
-CausalPy in a separate script. Never import both in the same process.
-
-**CausalPy on macOS:** Requires `cores=1` in `sample_kwargs` — the default multiprocessing
-fork causes `RuntimeError: An attempt has been made to start a new process before the current
-process has finished its bootstrapping phase`. Fix:
-
-```python
-model=cp.pymc_models.LinearRegression(
-    sample_kwargs={"random_seed": 42, "chains": 4, "draws": 2000, "tune": 1000, "cores": 1}
-)
-```
-
-### Weather data: Open-Meteo API
-
-Best free source for daily weather covariates (temperature, precipitation). No API key needed.
-
-```bash
-# Corporate SSL proxies may block Python requests — use curl -sk to bypass
-curl -sk "https://archive-api.open-meteo.com/v1/archive?latitude=51.5074&longitude=-0.1278&start_date=2024-10-01&end_date=2026-03-15&daily=temperature_2m_mean,precipitation_sum&timezone=Europe/London"
-```
-
-For recent days not yet in the archive, backfill from the forecast API:
-`https://api.open-meteo.com/v1/forecast` (same parameters).
-
-### Python version mismatch
-
-`pip3 install` may install to a different Python version's site-packages. Always use:
-```bash
-python3 -m pip install <package>  # installs to the correct python3's site-packages
-```
-Verify with `python3 -m pip show <package> | grep Location`.
+- **numpy conflict:** tfcausalimpact (numpy<2) and CausalPy (numpy>=2) cannot coexist. Run in separate scripts.
+- **CausalPy macOS:** Requires `cores=1` in sample_kwargs (multiprocessing fork issue).
+- **CausalPy short windows:** Fails with xarray `Dimension(s) 'draw', 'chain' do not exist` on <7 day treatment windows. Skip CausalPy and use RDiT as lead method.
+- **Weather API:** Open-Meteo, free, no key. Use `curl -sk` for corporate SSL proxies.
+- **Python version:** Always use `python3 -m pip install` to avoid version mismatch.
 
 ## References
 
-### Core BSTS / CausalImpact
+> **Full bibliography:** See [references/bibliography.md](references/bibliography.md)
 
-- [Brodersen et al., 2015] Brodersen, K.H., Gallusser, F., Koehler, J., Remy, N., Scott, S.L. "Inferring causal impact using Bayesian structural time-series models." *Annals of Applied Statistics*, 9(1), 247-274. DOI: 10.1214/14-AOAS788
-- [Scott & Varian, 2014] Scott, S.L., Varian, H.R. "Predicting the present with Bayesian structural time series." *International Journal of Mathematical Modelling and Numerical Optimisation*, 5(1/2), 4-23. DOI: 10.1504/IJMMNO.2014.059942
-
-### State-Space Methods & Seasonal Estimation
-
-- [Harvey, 1989] Harvey, A.C. *Forecasting, Structural Time Series Models and the Kalman Filter.* Cambridge University Press.
-- [Durbin & Koopman, 2012] Durbin, J., Koopman, S.J. *Time Series Analysis by State Space Methods.* 2nd ed., Oxford University Press.
-- [Koopman, 1997] Koopman, S.J. "Exact initial Kalman filtering and smoothing for nonstationary time series models." *JASA*, 92(440), 1630-1638. DOI: 10.1080/01621459.1997.10473685
-- [Hyndman & Kostenko, 2007] Hyndman, R.J., Kostenko, A.V. "Minimum sample size requirements for seasonal forecasting models." *Foresight*, Issue 6, 12-15.
-
-### FPR Calibration & Sample Size
-
-- [Gils et al., 2022] Gils, T. et al. "Evaluating the power of the causal impact method in observational studies of HCV treatment as prevention." *BMC Infectious Diseases* (PMC9204771). — BSTS FDR inflates to ~10% with 6 pre-period observations; ~5% with 12+.
-- [Peduzzi et al., 1996] Peduzzi, P. et al. "A simulation study of the number of events per variable in logistic regression analysis." *J. Clinical Epidemiology*, 49(12), 1373-1379. — EPV < 10 causes unreliable significance tests.
-- [Babyak, 2004] Babyak, M.A. "What you see may not be what you get: a brief, nontechnical introduction to overfitting in regression-type models." *Psychosomatic Medicine*, 66(3), 411-421.
-- [Afyouni et al., 2019] Afyouni, S., Smith, S.M., Nichols, T.E. "Effective degrees of freedom of the Pearson's correlation coefficient under autocorrelation." *NeuroImage*, 199, 609-625. — N_eff = N / (1 + 2*sum(rho_t)) formula.
-- [Oelrich et al., 2020] Oelrich, O. et al. "When are Bayesian model probabilities overconfident?" arXiv:2003.04026. — Bayesian posteriors overconfident when models are misspecified with large degrees of freedom.
-
-### Placebo Tests & Causal Inference Validation
-
-- [Abadie et al., 2010] Abadie, A., Diamond, A., Hainmueller, J. "Synthetic control methods for comparative case studies." *JASA*, 105(490), 493-505. — Established in-space placebo test protocol.
-- [Abadie et al., 2015] Abadie, A., Diamond, A., Hainmueller, J. "Comparative politics and the synthetic control method." *AJPS*, 59(2), 495-510. — Introduced in-time placebo test.
-- [Abadie, 2021] Abadie, A. "Using synthetic controls: feasibility, data requirements, and methodological aspects." *J. Economic Literature*, 59(2), 391-425. — Canonical definitions; more pre-period = lower bias.
-- [Eggers et al., 2024] Eggers, A.C., Tunon, G., Dafoe, A. "Placebo tests for causal inference." *AJPS*, 68(3), 1106-1121. — FPR = 5% defines well-calibrated; identified null-hacking threat.
-- [Athey & Imbens, 2017] Athey, S., Imbens, G. "The state of applied econometrics: causality and policy evaluation." *J. Economic Perspectives*, 31(2), 3-32. — Endorses placebo analyses as standard robustness requirement.
-- [Linden, 2018] Linden, A. "Using permutation tests to enhance causal inference in interrupted time series analysis." *J. Evaluation in Clinical Practice*, 24(3), 496-501. PMID: 29460383.
-
-### Interrupted Time Series
-
-- [Lopez Bernal et al., 2017] Lopez Bernal, J.A. et al. "Interrupted time series regression for the evaluation of public health interventions: a tutorial." *International Journal of Epidemiology*, 46(1), 348-355. — "No fixed limits" on minimum observations.
-- [Penfold & Zhang, 2013] Penfold, R.B., Zhang, F. "Use of interrupted time series analysis in evaluating health care quality improvements." *Academic Pediatrics*, 13(6 Suppl), S38-S44. — Minimum 8 observations for segmented OLS (not BSTS).
-
-### Posterior Probability Communication
-
-- [Makowski et al., 2019] Makowski, D. et al. "Indices of effect existence and significance in the Bayesian framework." *Frontiers in Psychology*, 10, Article 2767. — Formalized "Probability of Direction" (pd) metric.
-- [Marsman & Wagenmakers, 2016] Marsman, M., Wagenmakers, E.-J. "Three insights from a Bayesian interpretation of the one-sided p value." *Educational and Psychological Measurement*, 77(3), 529-539. — Under uniform priors, one-sided p = posterior mass below zero.
-- [Gelman & Yao, 2021] Gelman, A., Yao, Y. "Holes in Bayesian statistics." *Journal of Physics G*, 48(1). arXiv:2002.06467. — Pr(effect > 0) overstates certainty with flat priors.
-- [Muehlemann et al., 2023] Muehlemann, N. et al. "A tutorial on modern Bayesian methods in clinical trials." *Therapeutic Innovation & Regulatory Science* (PMC10117244). — Recommends posterior probabilities over p-values for non-technical audiences.
-- [Ruberg, 2021] Ruberg, S.J. "Detente: a practical understanding of p values and Bayesian posterior probabilities." *Clinical Pharmacology & Therapeutics*, 109(6), 1489-1498 (PMC8246739).
+Key citations: Brodersen et al. (2015), Scott & Varian (2014), Abadie et al. (2010, 2015, 2021),
+Eggers et al. (2024), Makowski et al. (2019), Gelman & Yao (2021), Gils et al. (2022),
+Athey & Imbens (2017), Linden (2018), Peduzzi et al. (1996), Afyouni et al. (2019).
