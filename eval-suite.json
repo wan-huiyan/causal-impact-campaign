@@ -2,7 +2,7 @@
   "skill_name": "causal-impact-campaign",
   "version": "2.0.0",
   "created_by": "research-backed-eval",
-  "notes": "v2.0.0: Added 22 assertion tests grounded in academic literature, 5 new trigger tests for merged skill content. See references/eval_research_notes.md for paper-to-assertion mapping.",
+  "notes": "v2.1.0: 34 assertion tests grounded in 25+ academic papers, 41 trigger tests. v2.0.0 had 22 assertions; v2.1.0 adds 12 gap-filling assertions from deep research (structural breaks, residual autocorrelation, pre-trend sensitivity, regression to mean, MDE, anticipation effects, log retransformation, SCA joint inference, model selection discipline, time-varying effects, SUTVA). See references/eval_research_notes.md.",
   "assertions": [
     {
       "id": "assert-perm-effect-size",
@@ -223,6 +223,126 @@
       "must_not_contain": ["exclude entirely", "remove the covariate"],
       "category": "covariates",
       "source": "Skill ADR 0020: treatment-window zeroing. Validated: unzeroed p=0.074, zeroed combined p=0.033."
+    },
+    {
+      "id": "assert-pre-period-fit",
+      "description": "Poor pre-period model fit invalidates the counterfactual",
+      "prompt": "I ran CausalImpact on our email campaign. The pre-period plot shows the model prediction hovering around the mean while actual data swings +/-40%. The summary reports +18% with p=0.08. Should I trust this?",
+      "expected_behavior": "Must warn that pre-period R-squared below ~0.70 is a failure condition, not just a warning. The counterfactual is unreliable when the model cannot track pre-period dynamics. Should recommend adding covariates that co-move with the outcome before drawing inference. Reporting p=0.08 from a poorly-fitting model is not valid.",
+      "must_contain": ["pre-period", "fit"],
+      "must_not_contain": ["yes you can trust", "looks good"],
+      "category": "validation",
+      "source": "Brodersen et al. (2015): pre-period predictive accuracy is the core validity check. CausalImpact vignette: 'examine how well the outcome data can be predicted before the beginning of the intervention.'"
+    },
+    {
+      "id": "assert-structural-break",
+      "description": "Structural breaks in pre-period corrupt the counterfactual baseline",
+      "prompt": "Our pre-period runs from January 2021 to November 2024. We relaunched the website in April 2022 which caused a permanent +30% step up in sessions. I kept the full pre-period for more data. The pre-period plot fits reasonably overall. Is there a problem?",
+      "expected_behavior": "Must warn that a structural break means the model is fitting across two regimes. The level shift biases seasonal and trend estimates. Should recommend either starting the pre-period after the known break, or explicitly modeling the break date. Should NOT treat 'more data is always better' as safe.",
+      "must_contain": ["break", "regime"],
+      "must_not_contain": ["no problem", "more data is better"],
+      "category": "validation",
+      "source": "Zeileis et al. (2003): CUSUM/fluctuation tests for structural change. Bai & Perron (2003): sequential test for unknown break count."
+    },
+    {
+      "id": "assert-residual-autocorrelation",
+      "description": "Residual autocorrelation means model missed serial structure",
+      "prompt": "I set nseasons=7 for my daily data. The pre-period plot looks good visually. The ACF of residuals shows a spike at lag 14. The Ljung-Box test at lag 14 gives p=0.003. My causal impact estimate is p=0.04. Should I be worried?",
+      "expected_behavior": "Must warn that significant residual autocorrelation at lag 14 means the model missed a fortnightly cycle. The stated p=0.04 is probably too optimistic because confidence intervals are too narrow. Should recommend trying nseasons=14 or adding a payday covariate and re-running.",
+      "must_contain": ["autocorrelation"],
+      "must_not_contain": ["looks fine", "no concern"],
+      "category": "validation",
+      "source": "Ljung & Box (1978): standard diagnostic for state-space model adequacy. Residual autocorrelation at seasonal lags indicates the model's seasonality period is wrong."
+    },
+    {
+      "id": "assert-pre-trend-sensitivity",
+      "description": "Pre-existing trend toward the effect direction may inflate the estimate",
+      "prompt": "My campaign ran in February. Looking at the pre-period chart, revenues were already rising in January before the campaign. The BSTS model captures this rising trend. My estimated effect is +15% with p=0.04. Is there a concern?",
+      "expected_behavior": "Must warn that a pre-existing positive trend is a confound. The model projects a rising counterfactual which partly explains the positive result, but there is sensitivity to how much of the post-period rise is trend continuation vs causal impact. Should recommend a sensitivity analysis showing how the estimate changes if the pre-trend is extrapolated more steeply.",
+      "must_contain": ["trend", "confound"],
+      "must_not_contain": ["no concern"],
+      "category": "interpretation",
+      "source": "Roth (2022, AER:I): pre-trend testing does not guarantee parallel trends hold post-intervention. Rambachan & Roth (2023, RES): sensitivity bounds for trend violations."
+    },
+    {
+      "id": "assert-regression-to-mean",
+      "description": "Campaign after unusual dip gets free 'lift' from mean reversion",
+      "prompt": "Sales dropped 35% below normal in the two weeks before our campaign due to bad PR. We launched the campaign to counter it. After the campaign, sales recovered to near-normal levels. BSTS attributes +18% lift (p=0.03). Is regression to the mean a concern?",
+      "expected_behavior": "Must warn that a 35% pre-campaign dip followed by return to normal is the textbook regression-to-the-mean pattern. BSTS projects continued below-normal counterfactual because the pre-period end is near the dip. Should ask what the counterfactual recovery would look like without the campaign.",
+      "must_contain": ["regression to the mean"],
+      "must_not_contain": ["campaign clearly worked"],
+      "category": "interpretation",
+      "source": "Campbell & Kenny (1999): extreme-group selection guarantees mechanical reversion. Marketing teams launch campaigns when sales are weak, creating systematic regression-to-mean bias."
+    },
+    {
+      "id": "assert-minimum-detectable-effect",
+      "description": "Underpowered studies produce uninformative non-significant results",
+      "prompt": "My campaign ran for 4 days. Pre-period daily revenue standard deviation is about 45K. My estimated effect is +85K total (~21K/day). The p-value is 0.11. Does this mean the campaign had no effect?",
+      "expected_behavior": "Must NOT conclude 'no effect' from a non-significant result in an underpowered design. Should calculate the minimum detectable effect (MDE) given the noise level and campaign duration. For a 4-day campaign with 45K daily SD, effects below ~140K are undetectable. The correct interpretation is 'we cannot detect effects smaller than approximately X with this study design.'",
+      "must_contain": ["power", "detect"],
+      "must_not_contain": ["no effect", "campaign didn't work"],
+      "category": "interpretation",
+      "source": "Schochet (2022, JEBS): MDE for ITS estimators. Djimeu & Houndolo (2016): power calculation for causal inference."
+    },
+    {
+      "id": "assert-anticipation-effects",
+      "description": "Pre-announced campaigns contaminate the end of the pre-period",
+      "prompt": "Our campaign started March 1st. We sent a teaser email on February 25th. I used all data up to February 28th as my pre-period. The last few days show a small uptick. My estimate is +12% with p=0.06. Is the pre-period end date correct?",
+      "expected_behavior": "Must warn that the last 5-7 days of the pre-period are contaminated by anticipation effects from the teaser email. Should recommend truncating the pre-period to before the teaser (February 24th at the latest) and re-running. Including anticipation-contaminated days in the baseline biases the counterfactual.",
+      "must_contain": ["anticipat"],
+      "must_not_contain": ["pre-period is fine"],
+      "category": "methodology",
+      "source": "Malani & Reif (2015, J Public Econ): pre-trends as anticipation produce underestimates of treatment effects when not accounted for."
+    },
+    {
+      "id": "assert-log-retransformation",
+      "description": "Naive exp() of log-scale effects underestimates mean currency amounts",
+      "prompt": "I fitted BSTS on log(daily revenue). The posterior mean of the cumulative log-scale effect is 0.18 (~+18%). To convert to pounds I exponentiated: exp(0.18) x baseline = +410K. My client wants the expected total uplift in pounds for ROI. Is this right?",
+      "expected_behavior": "Must explain that for the median effect, exp(posterior median) is correct. But for the mean expected uplift (what finance needs for ROI), naive exponentiation is biased downward by Jensen's inequality. Should recommend Duan's smearing correction or half-variance correction exp(mu + sigma^2/2). The bias is typically 0.5-4.5% at enterprise scales.",
+      "must_contain": ["Jensen", "bias"],
+      "must_not_contain": [],
+      "category": "methodology",
+      "source": "Duan (1983, JASA): smearing estimate for nonparametric retransformation. E[exp(X)] > exp(E[X]) by Jensen's inequality."
+    },
+    {
+      "id": "assert-sca-joint-inference",
+      "description": "Proportion of positive specs is not a p-value without joint test",
+      "prompt": "My SCA across 448 specs shows 87% positive direction and 87 specs with p<0.05. Only 6 specs are negative. Isn't that strong evidence? Can I report this as statistically validated?",
+      "expected_behavior": "Must explain that direction consistency is qualitatively compelling but does not replace formal inference. The correct SCA inference requires a shuffle test: permute the outcome, rerun all specs, compute the fraction of shuffles where as many specs are significant as observed. Without that joint test, cannot claim p-level significance from spec proportions alone.",
+      "must_contain": ["joint", "shuffle"],
+      "must_not_contain": ["yes that's statistically validated"],
+      "category": "methodology",
+      "source": "Simonsohn, Simmons & Nelson (2020, Nature Human Behaviour): specification curve analysis Step 3 — joint inference via permutation omnibus test."
+    },
+    {
+      "id": "assert-model-selection-not-on-p",
+      "description": "Must not select winning spec based on post-period p-value alone",
+      "prompt": "I ran 10 specifications. The one with p=0.03 uses 9 covariates including Google Trends and sale intensity. Two simpler specs give p=0.11. I want to report the p=0.03 spec. Is it legitimate to pick the spec with the best p-value?",
+      "expected_behavior": "Must warn that selecting a spec because it produces the lowest p-value is circular and inflates false positive rates. Model selection should use a pre-period criterion (LOO-CV, held-out RMSE, or Harvey's R-squared), not the post-period p-value. The winning spec should predict the pre-period best, then its post-period p is reported without cherry-picking.",
+      "must_contain": ["circular", "pre-period"],
+      "must_not_contain": ["yes report the p=0.03"],
+      "category": "validation",
+      "source": "Vehtari, Gelman & Gabry (2017, Stat. Computing): PSIS-LOO for model comparison. Selecting on post-period p is equivalent to multiple testing without correction."
+    },
+    {
+      "id": "assert-time-varying-effects",
+      "description": "Must check if effect decays within the post-period (pull-forward risk)",
+      "prompt": "My 4-day campaign shows a cumulative lift of +290K. But the daily pointwise effects show 90% of the lift on day 1. Days 2-4 show near-zero effect. The client wants to know if the campaign 'worked.' What should I tell them?",
+      "expected_behavior": "Must explain that a front-loaded effect profile could be genuine launch-day demand OR demand pull-forward that will be followed by suppression. Should recommend inspecting post-campaign weeks for demand dip below counterfactual. If post-campaign sales dip, the net cumulative effect over a longer window (e.g., 4 weeks) is the correct measure of true incremental revenue.",
+      "must_contain": ["pull-forward"],
+      "must_not_contain": ["campaign definitely worked"],
+      "category": "interpretation",
+      "source": "Brodersen et al. (2015): three output panels (pointwise, cumulative) exist for this purpose. Shadish, Cook & Campbell (2002): ITS design variants for treatment effect heterogeneity over time."
+    },
+    {
+      "id": "assert-covariate-sutva",
+      "description": "Campaign may have lifted the covariates themselves (SUTVA violation)",
+      "prompt": "I used Google Trends for 'trainers UK' as a covariate. My campaign included a TV ad about trainers. After the campaign, 'trainers UK' search volume went up 15%. Could this affect my estimate?",
+      "expected_behavior": "Must warn this is a covariate SUTVA violation — the campaign lifted category-level search. The counterfactual absorbs some of the real effect, underestimating the true lift. Should recommend testing sensitivity with and without this covariate. A >10% change in the point estimate signals contamination.",
+      "must_contain": ["contaminat"],
+      "must_not_contain": ["no effect on estimate"],
+      "category": "covariates",
+      "source": "Rubin (1980): SUTVA. Pearl (2009): d-separation and covariate contamination. Extends assert-covariate-contamination to category-level search signals."
     }
   ],
   "triggers": [
