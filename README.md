@@ -16,10 +16,13 @@ claude skill install wan-huiyan/causal-impact-campaign
 git clone https://github.com/wan-huiyan/causal-impact-campaign.git ~/.claude/skills/causal-impact-campaign
 ```
 
+**Requires:** Claude Code, Python 3.9+. Optional: GCP project for Cloud Run batch processing.
+
 **Not for:** A/B tests with randomized control groups, multi-touch attribution, time series forecasting, media mix modeling, or general dashboards.
 
 ## Quick Start
 
+Example output:
 ```
 You: We ran a free delivery promo for 10 days. Did it actually increase revenue?
      We have daily GA4 data in BigQuery.
@@ -77,7 +80,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 
 4. **Honest reporting framework.** Converts p-values to "probability of positive effect" for non-technical stakeholders. Distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results. Never claims significance you don't have.
 
-5. **34 research-backed eval assertions.** The eval suite tests methodology correctness against 25+ academic papers (Abadie 2010, Brodersen 2015, Eggers 2024, Young 2019, Roth 2022, and more). Schliff score: 100/100.
+5. **34 research-backed eval assertions.** The eval suite tests methodology correctness against 25+ academic papers (Abadie 2010, Brodersen 2015, Eggers 2024, Young 2019, Roth 2022, and more).
 
 ## Companion Skills
 
