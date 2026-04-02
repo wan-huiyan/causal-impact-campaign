@@ -461,6 +461,7 @@ For publication-quality robustness evidence, run an SCA that exhaustively tests 
 **Infrastructure dimension (model structure):**
 - Pre-period modes: full (no mask), full + mask BF/Xmas, full + mask Nov-Jan, post-holiday trimmed
 - Note: masking and trimming are **mutually exclusive** (both solve holiday variance differently)
+- Note: masking and seasonal decomposition enrichments (e.g., xmas_intensity_decomposed → bf_spike, bf_weekend, gift_shopping, mid_dec_baseline, boxing_day) are **also mutually exclusive** — the mask removes the exact dates where these Gaussian signals are non-zero, making them constant (all zeros) in the pre-period. Pick one: mask to remove holiday variance, OR decompose to model it.
 - Seasonality: nseasons=7 (weekly) vs 14 (biweekly)
 
 **Enrichment dimension (feature engineering choices):**
@@ -478,12 +479,23 @@ Organize into groups, test head-to-head within each group:
 - Universal facts (bank holidays, paydays) should be auto-detected from dates, not gated behind manual configuration
 - Forward stepwise bundles trace "what does each addition buy?" — often the first 2-3 enrichments capture 80% of the improvement
 - Leave-one-group-out bundles identify "which group matters most?" — usually external signals (Trends) > weather > calendar > DoW
+- **Decompose composite covariates:** If a calendar signal has known sub-components (e.g., 6 Gaussian peaks for holiday intensity), offer them as separate columns so the model's spike-and-slab prior can weight each independently
+- **Head-to-head bundles must test genuinely different signals.** If two options produce >80% overlapping columns (e.g., "holiday_flag" and "bank_holidays" are near-duplicates), replace one with a distinct signal (e.g., payday proximity)
+- **Date masking invalidates pre-resolved dates.** When masking removes early dates (e.g., Jan 1-5), any pre-period start date resolved before masking must be clamped to the actual data range after `prep_df` reindexes
+- **Short post-holiday pre-periods dominate low-p specs.** This reflects regime homogeneity (Jan-Feb is structurally stable), not cherry-picking. The mechanism: removing high-variance holiday periods reduces observation error variance, narrowing CIs. Validate with permutation tests.
+
+**SCA validation — permutation tests on top specs:**
+- Run 10 permutation shuffles on the top 50 SCA specs (by p-value) = 500 parallel tasks
+- Any spec with permutation-p > 0.10 should be flagged as potentially spurious
+- Prior experience: sale signals alone pass BSTS p-value but FAIL permutation; when combined with external signals (Trends), the combination passes — suggesting the external signal carries the robust causal information
 
 **SCA output should include:**
-1. Spec curve chart: bars sorted by effect size, CI whiskers, colored by significance
+1. Spec curve chart: bars sorted by p-value (acceptable if permutation-validated), CI whiskers, colored by significance
 2. Indicator matrix: binary grid showing which choices produced each bar
 3. Dimension impact analysis: per-group average p improvement when included vs excluded
-4. Summary: median effect, IQR, % significant, % positive direction
+4. Pre-period mode breakdown: how many specs per mode reach significance (expect short pre-period to dominate — document why)
+5. Summary: median effect, IQR, % significant, % positive direction
+6. Permutation p-value column in detail table for top 50 specs
 
 ## Step 5: Validate
 
