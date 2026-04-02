@@ -1,342 +1,180 @@
 # Causal Impact Campaign
 
-A [Claude Code](https://claude.com/claude-code) skill that measures the causal impact of an intervention on a time series metric using Bayesian structural time series — with 9-method validation, Specification Curve Analysis (440-spec robustness sweep), permutation testing, and client-ready deliverables.
+**Measure whether your campaign actually worked — not just "revenue went up."**
+
+Bayesian counterfactual analysis with multi-method validation, permutation testing, and client-ready deliverables. A [Claude Code](https://claude.com/claude-code) skill that automates the full pipeline so you get a defensible estimate instead of a naive before/after comparison.
 
 ![Demo output — causal impact analysis summary](docs/demo-output.png)
-*Example output: policy impact summary with dual-method agreement, key modelling decisions, and validation checks.*
+
+## Install
+
+```bash
+# Claude Code
+claude skill install wan-huiyan/causal-impact-campaign
+
+# Or clone directly
+git clone https://github.com/wan-huiyan/causal-impact-campaign.git ~/.claude/skills/causal-impact-campaign
+```
+
+**Not for:** A/B tests with randomized control groups, multi-touch attribution, time series forecasting, media mix modeling, or general dashboards.
 
 ## Quick Start
 
 ```
-You: We reduced speed limits to 20mph in residential zones on Feb 3. Can you measure the impact on accidents?
+You: We ran a free delivery promo for 10 days. Did it actually increase revenue?
+     We have daily GA4 data in BigQuery.
 
-Claude: I'll run the full causal impact pipeline...
+Claude: [runs full pipeline — data exploration, covariate safety audit, 4-method
+         analysis, permutation validation, client-ready HTML]
 
-        Step 1: Data exploration — 90 days pre-period, 26-day post-period
-        Step 2: Covariate engineering — DoW, rainfall, daylight hours
-        Step 3: Safety audit — construction_zones correlated with intervention (r=0.79)
-                → REMOVED (was absorbing 8 accidents/day of causal effect)
-        Step 4: Dual-method analysis:
-                tfcausalimpact (BSTS): −23 accidents/day, p=0.028 ✓
-                CausalPy (RDiT):      −26 accidents/day, p=0.019 ✓
-        Step 5: Validation — 3 backtests passed, 1 placebo passed
-        Step 6: Findings narrative + HTML deliverables generated
+        BSTS:  +22%, p=0.04, 96% probability positive
+        RDiT:  +18%, CI excludes zero
+        Both methods agree on direction and magnitude.
 
-        Without safety audit: p=0.187 (not significant — contaminated covariate
-        was absorbing 8 accidents/day of the effect). After systematic modelling improvements:
-
-        VERDICT: Significant at p<0.05. −23 accidents/day reduction (97.2% probability)
+        Without safety audit: p=0.187 (contaminated covariate was absorbing
+        the effect). After removing it: p=0.04. This is why the audit matters.
 ```
 
-*(Synthetic example — numbers are illustrative. Works with any metric, intervention, and time series.)*
+Auto-triggers on: "causal impact", "campaign uplift", "did the campaign work", "measure uplift", "promo effect", "incrementality", "is my BSTS overfit", "false positive rate", "validate my permutation test".
 
-The skill auto-triggers when you mention "causal impact", "campaign uplift", "did the campaign work", or want to measure the effect of any intervention on a time series. Additional triggers:
-- "Did the promotion actually increase revenue?"
-- "How much additional revenue did the campaign generate?"
-- "Is the revenue change from the campaign or just seasonality?"
-- "Estimate the ROI of our marketing intervention"
-- "The p-value is 0.12 — did it work?"
-- "Is my BSTS result overfit?" / "What's the false positive rate?"
-- "How do I calibrate my causal impact model?"
-- "Validate my permutation test results"
+## Why This Exists
 
-## Installation
+Without a causal framework, you get:
+- **"Revenue went up 15%"** — but was it the campaign, or would it have happened anyway?
+- **Contaminated covariates silently absorb your effect** — a real p<0.05 result looks like p=0.19 when you include a covariate affected by the intervention
 
-### Claude Code (recommended)
-```bash
-/plugin marketplace add wan-huiyan/causal-impact-campaign
-/plugin install causal-impact-campaign@wan-huiyan-causal-impact-campaign
-```
+This skill constructs a Bayesian counterfactual, runs a safety audit on every covariate, cross-validates with multiple methods, and validates with permutation tests before you report anything.
 
-Or clone directly:
-```bash
-git clone https://github.com/wan-huiyan/causal-impact-campaign.git ~/.claude/skills/causal-impact-campaign
-```
+### vs. Alternatives
 
-### Cursor
-```bash
-# Per-project rule (most reliable)
-mkdir -p .cursor/rules
-# Create .cursor/rules/causal-impact-campaign.mdc with SKILL.md content + alwaysApply: true
-
-# Or global install
-git clone https://github.com/wan-huiyan/causal-impact-campaign.git ~/.cursor/skills/causal-impact-campaign
-```
-
-## The Problem
-
-You changed a policy. Accidents went down. But was it the policy, or would it have happened anyway?
-
-Without a causal framework, you're left with:
-- **Before/after comparison** — ignores seasonality, trends, and external factors
-- **"Accidents dropped 15%"** — correlation, not causation. What if weather improved that month?
-- **No uncertainty quantification** — stakeholders get a point estimate with no error bars
-
-This skill constructs a Bayesian counterfactual ("what would have happened without the intervention") and measures the gap — with proper uncertainty, validation, and dual-method cross-checking.
+| Tool | What it does | This skill adds |
+|------|-------------|----------------|
+| [Google CausalImpact](https://google.github.io/CausalImpact/) (R) | Single-method BSTS | Multi-method validation, covariate safety audit, permutation testing, FPR calibration |
+| [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact) (Python) | Python port, simple API | Same as above, plus automated covariate engineering and client deliverables |
+| [Meta GeoLift](https://github.com/facebookincubator/GeoLift) | Geo-level synthetic control | Works on single time series (no geo holdout needed), 448-spec robustness sweep |
+| [CausalPy](https://github.com/pymc-labs/CausalPy) | Bayesian ITS + RDiT | Wraps CausalPy as one of 4+ methods, adds the validation layer on top |
 
 ## How It Works
 
 | Step | What Happens |
 |------|-------------|
-| 1. Explore | Understand the intervention, check date ranges, identify covariates |
-| 2. Engineer | Cyclical day-of-week, multi-modal holiday intensity, weather, paid/organic splits |
-| 3. Safety Audit | Flag covariates correlated with the intervention (they absorb causal effect) |
-| 4. Multi-Method | Run 9 methods: 4 BSTS variants, RDiT, CausalPy, Conformal, Prophet |
-| 5. SCA Sweep | 440-spec Specification Curve Analysis: 55 covariate bundles x 8 infra combos |
-| 6. Validate | Permutation tests (50-500 shuffles), rolling backtests, placebo tests |
-| 7. Interpret | Client-ready narrative with honest uncertainty communication |
-| 8. Deliver | Interactive HTML explorer + spec curve chart + standalone report |
+| 1. Understand | Establish intervention dates, channels, concurrent campaigns |
+| 2. Explore | Check date ranges, seasonality, paid vs organic split |
+| 3. Engineer | Cyclical day-of-week, holiday intensity curves, weather, sale detection |
+| 4. Safety Audit | Flag covariates correlated with intervention — they absorb causal effect |
+| 5. Multi-Method | Run BSTS (VI + HMC), CausalPy, RDiT, Conformal CIs, Prophet |
+| 6. Validate | Permutation tests (effect-size comparison), placebo FPR calibration, rolling backtests |
+| 7. Interpret | Honest uncertainty communication with prob_positive framing |
+| 8. Deliver | Interactive HTML explorer + findings doc + spec curve chart |
 
-## The Journey: p~0.22 to p<0.05
+## What Makes This Different
 
-Every causal analysis follows the same pattern: a promising-but-not-significant first result, then systematic improvements that either find the real signal or confirm there isn't one. Here's what that looks like:
+1. **All methods are miscalibrated.** We tested BSTS VI, BSTS HMC, Prophet, and RDiT on placebo data — all show 35-55% false positive rates. The skill gates every result through permutation testing (effect-size comparison, not p-values) to provide honest significance.
 
-| Step | p-value | Key insight |
-|---|---|---|
-| Original spec | 0.223 | Solid foundation — correct direction |
-| Exclude high-variance period from pre-period | 0.163 | -27% CI width. Seasonal variance was the dominant noise |
-| Multi-modal holiday intensity (v2) | 0.140 | 6-component curve (r=0.828) beats single Gaussian (r=0.632) |
-| Remove contaminated covariate | ~0.06 | Biggest single improvement — was absorbing the effect |
-| Add weather + clean spec | 0.039 | Significant at p<0.05 — but only 1 of 48 experiments |
-| **Mask winter sale periods** | **0.047** | **Masking Nov-Jan both years: CV 58%→24%, 12/12 specs positive** |
+2. **Covariate safety audit catches the #1 silent failure.** A covariate that changed during the intervention absorbs your causal effect, biasing estimates toward zero. The skill tests each covariate and flags INCLUDE/CAUTION/SKIP.
 
-**The meta-lesson:** The path to significance was dominated by **removing** things, not adding them. The masking breakthrough — excluding high-variance winter sale periods while preserving the full annual cycle — was the single biggest improvement, turning a fragile single-spec result into robust multi-spec evidence.
+3. **448-spec Specification Curve Analysis.** Instead of reporting one cherry-picked p-value, the skill tests all analytical "forking paths" — 55 covariate bundles x 8 infrastructure combos — and reports the full distribution.
 
-## What This Catches
+4. **Honest reporting framework.** Converts p-values to "probability of positive effect" for non-technical stakeholders. Distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results. Never claims significance you don't have.
 
-### Strategic traps (these save weeks)
-
-- **Contaminated covariates silently absorb causal effects.** A covariate correlated with both the outcome *and* the intervention timing absorbs the effect you're trying to measure — making a real p<0.05 result look like p=0.187. The skill runs a safety audit (correlation + intervention change) and flags INCLUDE/CAUTION/SKIP per covariate.
-- **Before/after isn't causation.** Without a counterfactual, "accidents dropped 15%" could be weather, seasonality, or regression to the mean. The skill constructs a Bayesian synthetic control and measures the gap with proper uncertainty.
-- **Single-method fragility.** One p-value from one method doesn't convince stakeholders (or reviewers). The skill runs two independent methods (BSTS + RDiT) — agreement between them is stronger evidence than any single result.
-- **Overclaiming kills credibility.** Presenting a marginal result as definitive, or a short campaign as conclusive, damages trust. The skill estimates minimum detectable effect upfront and uses calibrated language ("likely" not "definitely" for 90-95% probability).
-- **Specification search disguised as robustness.** Testing N specs and headlining the one that crosses p<0.05 is not discovery — it's the garden of forking paths. The skill includes a Claim Framing Guide that distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results and leads with the Bayesian posterior across ALL specs.
-- **Fake p-values from multi-method pipelines.** CausalPy ITS returns a constant p=0.25 regardless of effect. Conformal prediction returns binary p=0.5 or p=0.05. If you aggregate these with real BSTS p-values, you get a misleading "4 methods agree" scorecard. The skill flags non-BSTS p-values as `p=None` and labels them "N/A" in client-facing outputs.
-- **Probability range inflation via 1-p conversion.** Computing `1 - p` per method and quoting the range (e.g., "75-97%") inflates confidence when methods have fundamentally different statistical meanings. The skill uses the primary BSTS posterior as the single probability statement.
-- **Internal doc drift from deliverable reframing.** When you reframe claims in client deliverables (e.g., from "significant" to "exploratory"), the internal reference document keeps the old framing. An auditor reads the internal doc first and sees the stale version. The skill enforces same-commit updates.
-
-### Methodological traps (these save hours)
-
-- **High-variance pre-periods inflate confidence intervals.** Seasonal peaks in the pre-period add noise the model can't explain. Masking them (keeping dates but excluding from training) preserves annual cycle while dropping CV from 58% to 24%.
-- **Wrong model class for the study design.** WeightedSumFitter (synthetic control) doubled sigma on single-unit ITS data. The skill selects the right CausalPy model class for your design.
-- **Overfitting with unnecessary features.** Fourier terms need 2+ annual cycles; sin/cos DoW is redundant with nseasons=7. More features ≠ better counterfactual.
-- **RDiT bandwidth sensitivity.** RDiT results can flip between significant and not-significant depending on bandwidth choice. The skill now tests 4 bandwidths (7, 14, 21, 28 days) and reports the sensitivity table.
-
-## Interactive Explorer
-
-The skill generates a **single self-contained HTML file** the client opens in their browser — no server, no install, works offline. Built with Plotly.js and embedded pre-computed data.
-
-**What the client can do:**
-- **Switch model specifications** — dropdown selector updates all metrics live (headline £, p-value, CI, confidence badge)
-- **Explore the counterfactual chart** — zoom, pan, hover for daily values on the observed vs predicted revenue timeline
-- **Compare methods** — click between BSTS, RDiT, CausalPy, and Conformal to see effect estimates with CI error bars
-- **Drill into the mechanism** — decomposition cards show Conversion Rate (+14%), Transactions (+19%), AOV (+0.7%)
-- **Check persistence** — tabbed view of during-promo vs after-promo daily effects, plus paid vs organic channel split
-
-The client explores robustness themselves rather than trusting a static summary. When they toggle between 12 model specifications and see the uplift stay positive across all of them, that's more convincing than any single p-value.
-
-![Interactive explorer — model specification selector with live-updating metrics and Plotly.js counterfactual chart](docs/demo-interactive.png)
-
-## Specification Curve Analysis (SCA)
-
-For publication-quality robustness evidence, the skill runs a **440-spec SCA** that exhaustively tests all analytical "forking paths" — not just model choices but feature engineering choices too.
-
-**Infrastructure sweep (8 combos):** 4 pre-period modes (full, mask BF-Jan, mask Nov-Jan, post-holiday trimmed) x 2 seasonality (weekly, biweekly). Masking and trimming are mutually exclusive.
-
-**Enrichment sweep (55 curated bundles in 6 groups):**
-- **DoW encoding:** none, sin/cos, binary weekend, day dummies (5 options)
-- **Calendar:** none, Christmas intensity, bank holidays, payday window (5 options)
-- **Weather:** raw, self-interactions (cold_rain), day-type interactions, sale-intensity interactions (6 options)
-- **External signals:** Google Trends category, brand share (4 options)
-- **Sale signals:** binary flag, continuous intensity, both (4 options)
-- **Transforms:** log target, payday x weekend interaction (4 options)
-
-**Bundle strategies:** Forward stepwise (what does each addition buy?), leave-one-group-out (which group matters most?), head-to-head within groups (which variant is best?), validated specs (consistency check), kitchen sink (extremes).
-
-**Output:** Spec curve chart (440 bars sorted by effect, CI whiskers, significance coloring), indicator matrix, dimension impact analysis (per-group average p improvement), and forward stepwise path chart.
-
-The SCA replaces "we found p<0.05" with "across 440 specifications, the median effect is +X (IQR: Y to Z), N% show significance at p<0.05, and 100% agree on direction."
-
-## Key Techniques Explored
-
-### What worked
-
-| Technique | Impact | How |
-|---|---|---|
-| **Combined covariate safety audit** | Removed significant bias | Checks both correlation AND intervention safety → INCLUDE/CAUTION/SKIP |
-| **Masked pre-periods** | CV 58%→24%, p<0.05 | Mask winter sale windows instead of truncating — preserves annual cycle |
-| **Pre-period exclusion of high-variance events** | -27% CI width | Start after seasonal peaks to avoid variance inflation |
-| **Multi-modal holiday intensity (v2)** | r: -0.024→0.828 | 6-component curve: main peak, secondary peak, ramp, shoulder, baseline, post-event |
-| **RDiT (Regression Discontinuity in Time)** | Achieved significance | Local boundary comparison — best method for interventions <7 days |
-| **Conformal prediction intervals** | 61% tighter CIs | Distribution-free intervals from pre-period residual quantiles |
-| **Effect decomposition** | Identified primary lever | Separate CausalImpact on sub-metrics reveals which lever moved |
-| **Post-intervention persistence** | 66% effect persisted | Full-period analysis showed effect continued weeks post-intervention |
-| **Weather covariates** | -3.2% CI width | Open-Meteo API — exogenous, always safe |
-
-### What didn't work (and why)
-
-| Technique | Hypothesis | Result | Lesson |
-|---|---|---|---|
-| Fourier annual seasonality (k=1..4) | Capture yearly patterns | +0.9% CI (worse) | Needs 2+ annual cycles; insufficient data |
-| sin/cos day-of-week encoding | Capture full weekly cycle | Redundant with nseasons=7 | tfcausalimpact already models DoW internally |
-| CausalPy WeightedSumFitter | SC-style weighted combination | sigma doubled | Wrong model class for single-unit ITS |
-| Holiday intensity v3 (improved post-event) | Better post-peak fit | r dropped 0.828→0.795 | Post-peak is tiny fraction of data |
-| Paid share ratio covariate | Media intensity signal | r=0.14, no improvement | Low correlation, added noise |
-
-## Key Lessons Encoded
-
-**Strategic** (apply to any causal analysis):
-- **Subtract before you add** — removing contaminated covariates and high-variance pre-periods beats adding more features
-- **Mask, don't truncate** — masking high-variance windows preserves the annual cycle while removing noise. In one engagement, this dropped CV from 58% to 24%
-- **Contaminated covariates silently absorb causal effects** — always run a safety audit (correlation + intervention change)
-- **Two methods > one** — cross-method agreement provides stronger evidence than any single p-value
-- **Honest uncertainty builds client trust** — never claim statistical significance you don't have
-- **Run many specs, report all of them** — 12/12 positive specs is stronger evidence than 1/1 significant
-
-**Tactical** (specific techniques):
-- **Binary flags can't capture magnitude** — use multi-modal intensity curves for seasonal peaks
-- **RDiT beats BSTS for short interventions** — local boundary comparison achieves significance where global BSTS can't
-- **Conformal CIs are 61% tighter than Bayesian** — distribution-free uncertainty as a sanity check
-- **nseasons=7 makes DoW redundant, but nseasons=14 needs it** — sin/cos is redundant with weekly seasonality but essential with biweekly
-- **Cloud Run for parallel BSTS** — 440 specs in ~6 min vs hours sequential, ~$0.50 total
-- **Continuous sale intensity > binary flag** — MAD z-scores naturally weight major sales (z~5) higher than small promos (z~2.6)
-- **Weather interactions encode consumer behaviour** — `precip x sale_intensity` = "friction x intent"
-- **Masking and trimming are mutually exclusive** — both solve holiday variance, don't cross them in a sweep
-- **SCA bundles should be curated, not full factorial** — 55 representative bundles answer more questions than 9,600 random combinations
-
-## Limitations
-
-- **Requires sufficient pre-period data.** At least 3x the intervention length in clean pre-period. Structural breaks (e.g., school holidays) in the pre-period degrade predictions.
-- **No randomized control group.** This is a quasi-experimental method — it constructs a synthetic control from covariates, not a true counterfactual.
-- **Short campaigns are inherently hard.** Campaigns < 1 week have low statistical power. The skill estimates MDE upfront so you can set expectations.
-- **Masked pre-periods are not pre-registered.** Masking improves results but is a post-hoc decision. The skill frames masked specs as exploratory, not confirmatory.
-- **numpy version conflict.** tfcausalimpact requires numpy < 2.0; CausalPy requires numpy >= 2.0. The skill runs them in separate Python scripts.
-- **LLM-generated analysis code.** Queries and scripts are generated by Claude and should be reviewed before running.
-
-<details>
-<summary>Quality Checklist</summary>
-
-The skill verifies before delivering results:
-
-- Intervention dates confirmed and data available
-- Pre-period length >= 3x campaign length
-- Covariate safety audit run (flag any with r > 0.5 to intervention indicator)
-- At least one backtest passes (predicted vs actual in held-out pre-period)
-- Placebo test run (no false positive in pre-intervention period)
-- Dual-method analysis completed (tfcausalimpact + CausalPy)
-- Methods agree on direction (if not, investigate and document divergence)
-- Uncertainty intervals reported (not just point estimates)
-- Client narrative uses honest language ("likely" not "definitely" for 90-95% probability)
-- Deliverable HTML generated and opened for preview
-</details>
-
-## Dependencies
-
-| Package | numpy | Purpose |
-|---------|-------|---------|
-| `tfcausalimpact` | < 2.0 | Google's BSTS causal impact (variational inference) |
-| `causalpy` | >= 2.0 | PyMC Labs causal inference (HMC/NUTS sampling) |
-| `google-cloud-bigquery` | any | BigQuery data access |
-| `google-cloud-storage` | any | GCS for Cloud Run result collection (optional) |
-
-**Note:** tfcausalimpact and CausalPy must run in separate Python scripts due to incompatible numpy requirements.
-
-## Version History
-
-| Version | Date | Changes |
-|---------|------|---------|
-| **2.1.0** | 2026-04-02 | 34 research-backed eval assertions (25+ papers), trigger keywords for merged content, schliff 100/100 |
-| **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration into unified skill. Moved ~420 lines of reference content to `references/` files (-25% SKILL.md). Added data-provenance-verifier as companion skill. Added CausalPy short-window xarray error handling. |
-| **1.6.0** | 2026-03-25 | SCA (448-spec sweep), VI stochasticity warning, weather interactions, 9 methods |
-| **1.0.0** | 2026-03-15 | Initial release: dual-method (BSTS + CausalPy), covariate safety audit, client deliverables |
+5. **34 research-backed eval assertions.** The eval suite tests methodology correctness against 25+ academic papers (Abadie 2010, Brodersen 2015, Eggers 2024, Young 2019, Roth 2022, and more). Schliff score: 100/100.
 
 ## Companion Skills
 
 | Skill | Purpose |
 |-------|---------|
 | [data-provenance-verifier](https://github.com/wan-huiyan/data-provenance-verifier) | Verify external data files (weather, Trends CSVs) are genuine before analysis |
-| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs |
+| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs (~$0.50 for 448 specs) |
 | [client-proposal-slide](https://github.com/wan-huiyan/client-proposal-slide) | Create stakeholder-ready presentation from findings |
 
-## Eval Suite
-
-The skill includes a **research-backed eval suite** (`eval-suite.json`) with:
-- **34 assertion tests** grounded in 25+ academic papers (Abadie 2010/2021, Young 2019, Brodersen 2015, Eggers 2024, Makowski 2019, Roth 2022, Simonsohn 2020, and more)
-- **41 trigger tests** (27 positive, 14 negative)
-- **6 test cases** with 20 pattern assertions
-- **5 edge cases** (minimal input, concurrent interventions, insufficient data, stakeholder conflict, low granularity)
-
-Categories: methodology (7), validation (9), covariates (5), interpretation (7), client_framing (3), edge_cases (3).
-
-Schliff composite score: **100/100** (all 6 dimensions at 100).
-
-<details>
-<summary>References & Credits</summary>
-
-### Research
-
-- Brodersen, K. H. et al. (2015). [Inferring causal impact using Bayesian structural time-series models.](https://doi.org/10.1214/14-AOAS788) *Annals of Applied Statistics*, 9(1), 247–274.
-- Athey, S. et al. (2021). Matrix Completion Methods for Causal Panel Data Models. *JASA*. — SDID.
-- Arkhangelsky, D. et al. (2025). [Doubly Robust Identification for DiD and SC.](https://arxiv.org/abs/2503.11375) — DR-SDID.
-- Lei, J. & Candès, E. (2024). [Distribution-Free Prediction Intervals under Covariate Shift.](https://doi.org/10.1080/01621459.2024.2356886) *JASA*. — Conformal CIs.
-
-### Open Source
-
-| Project | Use in this skill |
-|---------|-------------------|
-| [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact) | Primary BSTS analysis method |
-| [CausalPy](https://github.com/pymc-labs/CausalPy) | Robustness check (RDiT, ITS) |
-| [google/CausalImpact](https://github.com/google/CausalImpact) | Conceptual foundation (R) |
-| [uber/orbit](https://github.com/uber/orbit) | Planned: time-varying coefficients |
-| [GeoLift](https://github.com/facebookincubator/GeoLift) | Planned: geo experiment design |
-| [pymc-marketing](https://github.com/pymc-labs/pymc-marketing) | Planned: full MMM |
-
-### Industry
-
-- [Stitch Fix — MarketMatching](https://multithreaded.stitchfix.com/blog/2016/01/13/market-watch/) — DTW for control market selection
-- [BBC Studios — Geo Holdouts with CausalPy](https://medium.com/bbc-studios-data-and-engineering/using-causal-inference-for-measuring-marketing-impact-how-bbc-studios-utilises-geo-holdouts-and-c9a8dac634c2)
-- [Calm — Bayesian Power Analysis](https://www.calm.com/blog/engineering/bayesian-power-analysis-at-calm-with-googles-causal-impact-library)
-</details>
-
-## Origin
-
-Built from real causal inference methodology applied to time series analysis. The methodology, covariate engineering, validation framework, and interpretation patterns are battle-tested on real data. The journey from non-significance to p<0.05 is documented in the SKILL.md.
-
-## Roadmap
-
-- [ ] **Uber Orbit BTVC** — time-varying covariate coefficients for drifting relationships
-- [ ] **Augmented Synthetic Control** — bias correction when convex hull violated
-- [ ] **PyMC-Marketing MMM** — full marketing mix modelling with causal identification
-- [ ] **Heterogeneous treatment effects** — varying intervention intensity analysis
-- [ ] **Automated Cloud Run deployment** — one-command setup for parallel spec execution
-
-## Companion Skills
-
-These skills form a complete causal inference toolkit when used together:
-
-- **[permutation-validation](https://github.com/wan-huiyan/permutation-validation)** — Validate model p-values with empirical permutation tests (REQUIRED before presenting results)
-- **[cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment)** — Scale permutation tests and sensitivity analyses to GCP Cloud Run Jobs
-
-## Related Skills
-
-- **[ml-feature-evaluator](https://github.com/wan-huiyan/ml-feature-evaluator)** — Structured feature evaluation diagnostic
-- **[client-proposal-slide](https://github.com/wan-huiyan/claude-client-proposal-slide)** — Turn analysis results into stakeholder-ready presentations
-- **[agent-review-panel](https://github.com/wan-huiyan/agent-review-panel)** — Multi-agent adversarial review for high-stakes deliverables
+**Merged skills:** `permutation-validation` and `bsts-placebo-calibration` are now built into this skill (v2.0.0). If you have them installed separately, you can uninstall them.
 
 ## Version History
 
-| Version | Changes |
-|---------|---------|
-| 1.5.0 | Masked pre-periods (CV 58%→24%, p<0.05), Cloud Run parallel execution (12 specs in 15 min), 12-spec sensitivity grid (3 covariate bundles x 4 pre-period options), updated journey to p<0.05 |
-| 1.4.0 | Multi-method pipeline gotchas (fake p-values, probability range inflation, internal doc drift), RDiT bandwidth sensitivity table, updated Claim Framing Guide with systematic rerun derivation, eval suite + composability (schliff 61→75.5) |
-| 1.3.0 | Claim Framing Guide from adversarial review — specification search warnings, scorecard consistency rules, Bayesian posterior framing |
-| 1.2.0 | Interactive HTML explorer with Plotly.js — spec selector, method comparison cards, decomposition, persistence/channel tabs |
-| 1.1.0 | CausalPy model selection guide (5 classes), quadratic time trend, internal notebook |
-| 1.0.0 | Initial release: dual-method analysis, RDiT, conformal CIs, power analysis, HTML deliverables |
+| Version | Date | Changes |
+|---------|------|---------|
+| **2.1.0** | 2026-04-02 | 34 research-backed eval assertions, trigger keywords for merged content |
+| **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration, reference files architecture, data-provenance-verifier companion |
+| **1.6.0** | 2026-03-25 | SCA (448-spec sweep), VI stochasticity warning, 9 methods |
+| **1.0.0** | 2026-03-15 | Initial release: dual-method analysis, covariate safety audit, client deliverables |
 
-## Acknowledgements
+<details>
+<summary>Interactive Explorer</summary>
 
-Trigger accuracy and eval suite improved using [schliff](https://github.com/Zandereins/schliff) — an autonomous skill scoring and improvement framework (composite score: 61.0 → 75.5).
+The skill generates a **single self-contained HTML file** the client opens in their browser — no server, no install, works offline.
+
+**What the client can do:**
+- Switch model specifications via dropdown — all metrics update live
+- Explore the counterfactual chart with Plotly.js (zoom, pan, hover)
+- Compare methods side-by-side with CI error bars
+- Drill into effect decomposition (Conversion Rate, Transactions, AOV)
+
+![Interactive explorer](docs/demo-interactive.png)
+
+</details>
+
+<details>
+<summary>Specification Curve Analysis</summary>
+
+The SCA tests all analytical "forking paths" across two dimensions:
+
+**Infrastructure (8 combos):** 4 pre-period modes (full, mask BF-Jan, mask Nov-Jan, post-holiday trimmed) x 2 seasonality (weekly, biweekly).
+
+**Enrichments (55 bundles in 6 groups):** DoW encoding, calendar signals, weather, external signals (Google Trends), sale detection, transforms.
+
+Output: spec curve chart (448 bars sorted by effect, CI whiskers), indicator matrix, dimension impact analysis, permutation p-values for top specs.
+
+</details>
+
+<details>
+<summary>Case Study: The Path to a Validated Result</summary>
+
+See [docs/case-study.md](docs/case-study.md) for the full journey from p=0.22 to a permutation-validated result — including the meta-lesson that removing things (contaminated covariates, high-variance pre-periods) beats adding them.
+
+</details>
+
+<details>
+<summary>Limitations</summary>
+
+- **Requires sufficient pre-period data.** At least 3x intervention length. Structural breaks degrade predictions.
+- **No randomized control group.** This is quasi-experimental — constructs a synthetic control from covariates.
+- **Short campaigns are inherently hard.** Campaigns < 1 week have low statistical power. The skill estimates MDE upfront.
+- **All built-in methods show elevated FPR (35-55%).** The skill mitigates this with permutation testing, but practitioners should understand the limitation.
+- **numpy version conflict.** tfcausalimpact (numpy < 2) and CausalPy (numpy >= 2) must run in separate scripts.
+- **CausalPy fails on short treatment windows** (< 7 days) with xarray dimension error. Use RDiT as lead method.
+
+</details>
+
+<details>
+<summary>Dependencies</summary>
+
+| Package | numpy | Purpose |
+|---------|-------|---------|
+| `tfcausalimpact` | < 2.0 | Google's BSTS causal impact |
+| `causalpy` | >= 2.0 | PyMC Labs causal inference (ITS, RDiT) |
+| `prophet` | any | Meta's forecasting (cross-validation method) |
+| `google-cloud-bigquery` | any | BigQuery data access |
+
+Python 3.9-3.12. macOS requires `cores=1` in CausalPy sample_kwargs.
+
+</details>
+
+<details>
+<summary>References</summary>
+
+Full bibliography: [references/bibliography.md](references/bibliography.md)
+
+**Core:** Brodersen et al. (2015), Scott & Varian (2014), Abadie et al. (2010, 2015, 2021)
+
+**Validation:** Eggers et al. (2024), Young (2019), Linden (2018), Athey & Imbens (2017)
+
+**Calibration:** Gils et al. (2022), Peduzzi et al. (1996), Oelrich et al. (2020)
+
+**Communication:** Makowski et al. (2019), Gelman & Yao (2021), Muehlemann et al. (2023)
+
+**Eval suite:** Roth (2022), Simonsohn et al. (2020), Duan (1983), Campbell & Kenny (1999), Malani & Reif (2015), Vehtari et al. (2017)
+
+</details>
 
 ## License
 
