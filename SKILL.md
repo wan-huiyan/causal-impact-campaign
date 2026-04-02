@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "1.6.0"
+version: "1.9.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -186,6 +186,14 @@ df['cos_dow'] = np.cos(2 * np.pi * df['date'].dt.dayofweek / 7)
 >   patterns → explicit DoW covariate is **needed** (sin_dow or is_weekend)
 >
 > When using CausalPy or other models without built-in seasonality, always include DoW covariates.
+>
+> **Data requirements scale with nseasons.** The seasonal state vector has dimension s-1
+> [Harvey, 1989], and the Kalman filter's exact diffuse initialization consumes d ≈ s
+> observations before the likelihood can even be evaluated [Koopman, 1997; Durbin & Koopman, 2012].
+> Practical minimum: at least 2 complete cycles of the seasonal period to distinguish seasonality
+> from noise [Hyndman & Kostenko, 2007]. This means nseasons=7 needs ≥14 pre-period days
+> (absolute minimum), while nseasons=14 needs ≥28. For reliable estimation under noisy data,
+> use 3-5× nseasons (i.e., 42-70 days for nseasons=14).
 
 #### 3. Holiday intensity (not binary flags)
 Holiday intensity encoding is one of the most important lessons. Binary flags like `winter_sale_flag` treat all
@@ -485,9 +493,14 @@ Organize into groups, test head-to-head within each group:
 - **Short post-holiday pre-periods dominate low-p specs.** This reflects regime homogeneity (Jan-Feb is structurally stable), not cherry-picking. The mechanism: removing high-variance holiday periods reduces observation error variance, narrowing CIs. Validate with permutation tests.
 
 **SCA validation — permutation tests on top specs:**
-- Run 10 permutation shuffles on the top 50 SCA specs (by p-value) = 500 parallel tasks
+- Run 30+ permutation shuffles on the top 5 specs per pre-period mode = ~600 parallel tasks
+- **CRITICAL: Compare EFFECT SIZES, not p-values.** Count shuffles where `|abs_eff| >= real |abs_eff|`.
+  Comparing p-values is confounded by BSTS VI p-value inflation (shuffled runs also get low p-values).
+  Effect-size comparison is immune to this miscalibration.
 - Any spec with permutation-p > 0.10 should be flagged as potentially spurious
-- Prior experience: sale signals alone pass BSTS p-value but FAIL permutation; when combined with external signals (Trends), the combination passes — suggesting the external signal carries the robust causal information
+- Include both log_target and raw_target variants per mode (log stabilizes variance, fairer effect-size comparison)
+- Prior experience: masking modes (mask_nov_jan) may pass permutation even when full_none fails,
+  because removing high-variance holiday periods creates a cleaner counterfactual baseline
 
 **SCA output should include:**
 1. Spec curve chart: bars sorted by p-value (acceptable if permutation-validated), CI whiskers, colored by significance
@@ -516,9 +529,9 @@ Measure:
 - **95% Coverage**: fraction of actuals within the 95% credible interval
 - **Placebo effect**: the estimated "effect" where none exists
 
-### Placebo test
+### Placebo test (rolling backtest)
 
-Compare the real intervention effect to the distribution of placebo effects:
+Compare the real intervention effect to the distribution of placebo effects from rolling backtests:
 
 ```python
 placebo_rank = (placebo_effects < real_effect).mean()  # if effect is positive
@@ -527,6 +540,75 @@ placebo_rank = (placebo_effects < real_effect).mean()  # if effect is positive
 If the real effect ranks above the 90th percentile of placebos, it's genuinely unusual.
 If it sits in the middle (50-70th percentile), the model can't distinguish it from noise.
 
+### Pre-period placebo test (MODEL CALIBRATION — CRITICAL)
+
+**This is the single most diagnostic validation for BSTS.** This is an "in-time placebo test"
+— the time series analogue of the in-space placebo tests established for synthetic control
+methods [Abadie et al., 2010; Abadie et al., 2015]. Place fake treatment windows at regular
+intervals through the pre-period where NO intervention occurred:
+
+```python
+# Place 4-day fake windows every 14 days through the pre-period
+# Run the same BSTS spec at each window
+# Count: what fraction detect p < 0.05?
+FPR = n_significant_placebos / n_total_windows
+# Well-calibrated model: FPR ≈ 5% [Eggers et al., 2024]
+# Miscalibrated: FPR >> 5% (model detects "effects" where none exist)
+```
+
+The 5% FPR threshold is the universal calibration standard: if tests use p < 0.05 as the
+significance criterion, a well-calibrated null distribution should produce significant results
+in exactly 5% of null runs [Eggers et al., 2024]. Permutation-based validation is endorsed
+as a standard robustness requirement for observational causal inference [Athey & Imbens, 2017;
+Linden, 2018].
+
+**This test catches a critical failure mode:** In one engagement, the top-ranked specifications
+showed model p=0.000 but the placebo test revealed **22% FPR** — the model was detecting
+"significant" effects at 22% of random dates where nothing happened. The p-values were
+inflated approximately 4× due to short pre-period (51 days with 6+ covariates).
+
+**Multi-method placebo FPR — empirical findings (updated session 33):**
+
+The miscalibration is **model-class-independent**, not specific to BSTS VI:
+- BSTS VI (variational inference): 41% FPR
+- BSTS HMC (NUTS sampler): 47% FPR
+- Prophet (Meta): 55% FPR
+- RDiT (local linear regression): 51% FPR
+
+Pre-period mode also doesn't fix it:
+- ~50 days pre-period (post-Xmas trimmed): FPR ~22%
+- ~700 days full pre-period (no mask): FPR ~39%
+- ~700 days with mask_bf_jan: FPR ~93% (masking creates gaps)
+- Guideline: **ALL tested methods produce 35-55% FPR on daily retail revenue.**
+  Pre-period length, inference method, and model class don't fix the root cause
+  (strong autocorrelation + complex seasonal patterns in daily data).
+- When ALL methods are miscalibrated, shift to alternative evidence: direction consistency,
+  **permutation tests using effect-size comparison**, and prob_positive.
+- See also: `bsts-placebo-calibration` skill for the full methodology.
+
+These empirical observations align with published simulation evidence. Gils et al. [2022]
+found that BSTS FDR inflates to ~10% with only 6 pre-period observations and recovers to
+~5% (nominal) with ≥12 observations. The mechanism: short pre-periods with many covariates
+produce an effective "events per variable" (EPV) ratio below the ~10 EPV threshold established
+for regression models [Peduzzi et al., 1996; Babyak, 2004]. For state-space models specifically,
+each state component (trend, seasonal, regression coefficients) consumes degrees of freedom
+from the pre-period [Durbin & Koopman, 2012], so the effective parameter count includes s-1
+seasonal states plus trend states plus covariate coefficients. With nseasons=14 and 6
+covariates, the effective parameter count is ~21 against a 51-day pre-period — EPV ≈ 2.4.
+Additionally, positive autocorrelation in daily data reduces the effective sample size:
+N_eff = N / (1 + 2Σρ_t), which can reduce 51 nominal days to ~13 effective observations
+at ρ ≈ 0.6 [Afyouni et al., 2019].
+
+No universal minimum pre-period exists in the BSTS literature — Brodersen et al. [2015]
+state no threshold, and the CausalImpact R package enforces only a floor of 3 time points.
+Lopez Bernal et al. [2017] argue against universal minimums, recommending case-by-case power
+simulation. Our ≥100-day guideline for 6+ covariates is a conservative practitioner threshold
+supported by the Gils et al. simulation evidence and the EPV literature, but should always be
+verified with a placebo test on the specific dataset.
+
+> **If FPR > 10%, the spec is miscalibrated. Do NOT use its p-values for significance claims.**
+> Report the calibrated specs' results instead, even if their p-values are higher.
+
 ### Scorecard
 
 | Check | Threshold | What It Means |
@@ -534,19 +616,19 @@ If it sits in the middle (50-70th percentile), the model can't distinguish it fr
 | Median backtest WAPE | ≤ 15% | Model predictions are accurate |
 | Mean 95% coverage | ≥ 80% | Uncertainty bands are well-calibrated |
 | Placebo rank | ≥ 90th %ile | Real effect is unusual vs noise |
+| **Pre-period FPR** | **≤ 10%** | **Model p-values are calibrated (not inflated)** |
 | All specs same direction | ≥ (N-1)/N | Result is robust to covariate choice |
 | Primary p-value (BSTS) | ≤ 0.10 | Effect is statistically significant (model-based) |
 | **Permutation p-value** | **≤ 0.10** | **Effect is unusual vs random dates (empirical)** |
 
-> **The permutation test is now REQUIRED, not optional.** BSTS p-values can be overconfident
-> when masking or tight model configurations (e.g., nseasons=14) are used. In a retail engagement,
-> BSTS p=0.017 corresponded to permutation p=0.24 (11/49 random dates matched the real effect).
-> The permutation p is the honest measure of whether the effect is genuinely distinguishable.
-> Run 50+ random intervention dates with the same model config. Use 1-model-per-Cloud-Run-job
-> for maximum parallelism (~10 min wall time for 50 permutations).
+> **Both the permutation test and pre-period placebo test are REQUIRED.**
+> - Permutation test: checks if the real date is special vs random dates (empirical significance)
+> - Pre-period placebo test: checks if the MODEL is calibrated (false positive rate)
+> - BSTS p-values alone are unreliable — they can be overconfident with short pre-periods,
+>   many covariates, or masking. In one engagement, BSTS p=0.000 corresponded to 22% FPR.
 
-Passing all 5 = strong result. Passing 3+ with consistent direction = defensible.
-Failing most = honest finding — report it as such.
+Passing all checks = strong result. Passing 4+ with consistent direction = defensible.
+Failing FPR check = model is miscalibrated — find a better-calibrated spec before reporting.
 
 ### Watch for problematic backtest windows
 
@@ -567,6 +649,26 @@ More data is NOT always better. Longer pre-periods can hurt if:
 The binding constraint is often **campaign calendar completeness** — the client may not have
 reliable records of which promotions ran 2+ years ago. Flags like `winter_sale_flag` are only
 useful if accurate.
+
+**But too SHORT is worse than too long.** In one engagement, trimming the pre-period to
+exclude holiday variance left only ~50 days of training data. BSTS with 6 covariates
+overfitted this short series, achieving p=0.000 — but the pre-period placebo test revealed
+22% FPR (the model detected "significant" effects at 22% of random dates where nothing
+happened). The same specs with 200+ day pre-periods had much better calibration.
+
+**Minimum pre-period guidelines for BSTS:**
+- ≥ 100 days with 6+ covariates (the regression component needs data to estimate coefficients)
+- ≥ 60 days with 2-3 covariates
+- ≥ 3× nseasons as absolute floor (Kalman filter diffuse initialization) [Durbin & Koopman, 2012]
+- If trimming to exclude holiday variance, verify the remaining pre-period is sufficient
+- Always run the pre-period placebo test to verify calibration
+
+Note: Brodersen et al. [2015] state no minimum pre-period; the CausalImpact R package enforces
+only a floor of 3 time points. The ITS literature recommends a minimum of 8 observations for
+segmented OLS [Penfold & Zhang, 2013], but BSTS with its Bayesian priors has different (and
+generally lower) minimum data requirements. Lopez Bernal et al. [2017] argue there are "no
+fixed limits" and recommend case-by-case power simulation. Our thresholds above are practitioner
+guidelines supported by the effective-sample-size argument and our empirical FPR testing.
 
 ### Framing for clients
 
@@ -600,9 +702,28 @@ After the primary analysis, run these extensions to deepen the insight:
 Run separate CausalImpact on `conversion_rate`, `aov`, and `transactions` as targets. This reveals
 **which lever the campaign pulled** — was it conversion, basket size, or traffic?
 
-In one retail case study: conversion rate showed the strongest signal (~+14%, ~83% prob positive)
-while AOV barely moved. This told us the delivery promo removed a conversion barrier — people
-already browsing decided to buy because delivery was free. They didn't spend more per order.
+In one retail engagement: conversion rate showed the strongest signal (+17%, 87% probability
+positive) while AOV barely moved (+0.6%). Transactions and revenue rose proportionally (+27-28%).
+This "conversion barrier removal" pattern told us the promo made hesitant shoppers buy —
+it didn't attract new visitors or increase basket size. This insight directly informed
+the client's next promotional strategy.
+
+**Client-friendly framing:** Use `prob_positive = 1 - p` (as a percentage) instead of raw
+p-values. "87% probability the effect is positive" resonates far better with business
+stakeholders than "p=0.133". Show this as a stat card and table column alongside p-values.
+
+This metric is formally called the "Probability of Direction" (pd) in the Bayesian literature
+[Makowski et al., 2019] and is exactly the "Posterior prob. of a causal effect" that CausalImpact
+reports in its summary output [Brodersen et al., 2015]. Under uniform priors, the one-sided
+frequentist p-value equals the posterior probability mass below zero [Marsman & Wagenmakers, 2016],
+so 1-p is a mathematically grounded Bayesian metric, not an informal conversion. The clinical
+trials literature consistently recommends posterior probabilities over p-values for non-technical
+stakeholders [Muehlemann et al., 2023; Ruberg, 2021].
+
+**Caution with flat priors:** Gelman & Yao [2021] warn that Pr(effect > 0) can overstate certainty
+when priors are flat/uninformative. CausalImpact uses spike-and-slab priors (regularizing), making
+this metric more defensible than it would be under flat priors. Still, always derive probability
+ranges from systematic sensitivity reruns, not cherry-picked specs (see Pitfall 10).
 
 This is often the most valuable insight for the client — it informs future offer design.
 
@@ -628,10 +749,11 @@ persistence_ratio = post_promo_avg_daily_effect / during_promo_avg_daily_effect
 - Ratio 10-50%: Partial persistence — mention as additional upside
 - Ratio < 10%: Effect dissipated — report promo-period only
 
-**Warning:** Persistence analysis is unreliable for short campaigns. In a retail case study, persistence
-ratios ranged from 55% to 188% across specifications (median ~97%). An extended post-period test (17 days)
-showed implausibly large cumulative effects — clearly a model artefact, not genuine persistence. BSTS continues to
-underpredict after the intervention ends because the structural break shifts the level.
+**Warning:** Persistence analysis is unreliable for short campaigns. In one engagement with
+clean covariates (A2.4 spec), the persistence ratio was 44% — effect partially persisted but
+diminished. However, previous analyses with contaminated covariates showed ratios from 55%
+to 188% (clearly artefacts). The key learning: persistence estimates are highly sensitive to
+covariate choice. Use clean covariates and interpret conservatively.
 Frame persistence as "inconclusive" unless multiple specs agree and the extended post-period is plausible.
 
 ### Weather Covariate
@@ -797,9 +919,11 @@ When external data sources are available, offer the analysis in tiers. Each tier
   which is more defensible for client claims than a lower p-value with CI crossing zero
 - "We're ~99% confident the effect is positive and at least £X" beats "p=0.008 but could be negative"
 
-**No hard covariate cap.** The BSTS horseshoe prior handles many covariates via shrinkage. If a
-9-covariate spec passes the 50-shuffle permutation test, the feature count doesn't matter. Use
-permutation p < 0.10 as the gatekeeper, not an arbitrary covariate budget.
+**No hard covariate cap.** The BSTS spike-and-slab prior handles many covariates via shrinkage
+[Scott & Varian, 2014]. If a 9-covariate spec passes the 50-shuffle permutation test, the
+feature count doesn't matter. Use permutation p < 0.10 as the gatekeeper, not an arbitrary
+covariate budget. However, with a weak "expected model size" prior and a short pre-period,
+the spike-and-slab may retain noisy regressors that inflate FPR [Oelrich et al., 2020].
 
 ## Step 7: Document
 
@@ -1437,3 +1561,47 @@ For recent days not yet in the archive, backfill from the forecast API:
 python3 -m pip install <package>  # installs to the correct python3's site-packages
 ```
 Verify with `python3 -m pip show <package> | grep Location`.
+
+## References
+
+### Core BSTS / CausalImpact
+
+- [Brodersen et al., 2015] Brodersen, K.H., Gallusser, F., Koehler, J., Remy, N., Scott, S.L. "Inferring causal impact using Bayesian structural time-series models." *Annals of Applied Statistics*, 9(1), 247-274. DOI: 10.1214/14-AOAS788
+- [Scott & Varian, 2014] Scott, S.L., Varian, H.R. "Predicting the present with Bayesian structural time series." *International Journal of Mathematical Modelling and Numerical Optimisation*, 5(1/2), 4-23. DOI: 10.1504/IJMMNO.2014.059942
+
+### State-Space Methods & Seasonal Estimation
+
+- [Harvey, 1989] Harvey, A.C. *Forecasting, Structural Time Series Models and the Kalman Filter.* Cambridge University Press.
+- [Durbin & Koopman, 2012] Durbin, J., Koopman, S.J. *Time Series Analysis by State Space Methods.* 2nd ed., Oxford University Press.
+- [Koopman, 1997] Koopman, S.J. "Exact initial Kalman filtering and smoothing for nonstationary time series models." *JASA*, 92(440), 1630-1638. DOI: 10.1080/01621459.1997.10473685
+- [Hyndman & Kostenko, 2007] Hyndman, R.J., Kostenko, A.V. "Minimum sample size requirements for seasonal forecasting models." *Foresight*, Issue 6, 12-15.
+
+### FPR Calibration & Sample Size
+
+- [Gils et al., 2022] Gils, T. et al. "Evaluating the power of the causal impact method in observational studies of HCV treatment as prevention." *BMC Infectious Diseases* (PMC9204771). — BSTS FDR inflates to ~10% with 6 pre-period observations; ~5% with 12+.
+- [Peduzzi et al., 1996] Peduzzi, P. et al. "A simulation study of the number of events per variable in logistic regression analysis." *J. Clinical Epidemiology*, 49(12), 1373-1379. — EPV < 10 causes unreliable significance tests.
+- [Babyak, 2004] Babyak, M.A. "What you see may not be what you get: a brief, nontechnical introduction to overfitting in regression-type models." *Psychosomatic Medicine*, 66(3), 411-421.
+- [Afyouni et al., 2019] Afyouni, S., Smith, S.M., Nichols, T.E. "Effective degrees of freedom of the Pearson's correlation coefficient under autocorrelation." *NeuroImage*, 199, 609-625. — N_eff = N / (1 + 2*sum(rho_t)) formula.
+- [Oelrich et al., 2020] Oelrich, O. et al. "When are Bayesian model probabilities overconfident?" arXiv:2003.04026. — Bayesian posteriors overconfident when models are misspecified with large degrees of freedom.
+
+### Placebo Tests & Causal Inference Validation
+
+- [Abadie et al., 2010] Abadie, A., Diamond, A., Hainmueller, J. "Synthetic control methods for comparative case studies." *JASA*, 105(490), 493-505. — Established in-space placebo test protocol.
+- [Abadie et al., 2015] Abadie, A., Diamond, A., Hainmueller, J. "Comparative politics and the synthetic control method." *AJPS*, 59(2), 495-510. — Introduced in-time placebo test.
+- [Abadie, 2021] Abadie, A. "Using synthetic controls: feasibility, data requirements, and methodological aspects." *J. Economic Literature*, 59(2), 391-425. — Canonical definitions; more pre-period = lower bias.
+- [Eggers et al., 2024] Eggers, A.C., Tunon, G., Dafoe, A. "Placebo tests for causal inference." *AJPS*, 68(3), 1106-1121. — FPR = 5% defines well-calibrated; identified null-hacking threat.
+- [Athey & Imbens, 2017] Athey, S., Imbens, G. "The state of applied econometrics: causality and policy evaluation." *J. Economic Perspectives*, 31(2), 3-32. — Endorses placebo analyses as standard robustness requirement.
+- [Linden, 2018] Linden, A. "Using permutation tests to enhance causal inference in interrupted time series analysis." *J. Evaluation in Clinical Practice*, 24(3), 496-501. PMID: 29460383.
+
+### Interrupted Time Series
+
+- [Lopez Bernal et al., 2017] Lopez Bernal, J.A. et al. "Interrupted time series regression for the evaluation of public health interventions: a tutorial." *International Journal of Epidemiology*, 46(1), 348-355. — "No fixed limits" on minimum observations.
+- [Penfold & Zhang, 2013] Penfold, R.B., Zhang, F. "Use of interrupted time series analysis in evaluating health care quality improvements." *Academic Pediatrics*, 13(6 Suppl), S38-S44. — Minimum 8 observations for segmented OLS (not BSTS).
+
+### Posterior Probability Communication
+
+- [Makowski et al., 2019] Makowski, D. et al. "Indices of effect existence and significance in the Bayesian framework." *Frontiers in Psychology*, 10, Article 2767. — Formalized "Probability of Direction" (pd) metric.
+- [Marsman & Wagenmakers, 2016] Marsman, M., Wagenmakers, E.-J. "Three insights from a Bayesian interpretation of the one-sided p value." *Educational and Psychological Measurement*, 77(3), 529-539. — Under uniform priors, one-sided p = posterior mass below zero.
+- [Gelman & Yao, 2021] Gelman, A., Yao, Y. "Holes in Bayesian statistics." *Journal of Physics G*, 48(1). arXiv:2002.06467. — Pr(effect > 0) overstates certainty with flat priors.
+- [Muehlemann et al., 2023] Muehlemann, N. et al. "A tutorial on modern Bayesian methods in clinical trials." *Therapeutic Innovation & Regulatory Science* (PMC10117244). — Recommends posterior probabilities over p-values for non-technical audiences.
+- [Ruberg, 2021] Ruberg, S.J. "Detente: a practical understanding of p values and Bayesian posterior probabilities." *Clinical Pharmacology & Therapeutics*, 109(6), 1489-1498 (PMC8246739).
