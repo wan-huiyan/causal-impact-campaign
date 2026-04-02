@@ -495,8 +495,21 @@ Organize into groups, test head-to-head within each group:
 **SCA validation — permutation tests on top specs:**
 - Run 30+ permutation shuffles on the top 5 specs per pre-period mode = ~600 parallel tasks
 - **CRITICAL: Compare EFFECT SIZES, not p-values.** Count shuffles where `|abs_eff| >= real |abs_eff|`.
-  Comparing p-values is confounded by BSTS VI p-value inflation (shuffled runs also get low p-values).
+  Comparing p-values is confounded by model p-value inflation (shuffled runs also get low p-values).
   Effect-size comparison is immune to this miscalibration.
+- This follows the established methodology in the causal inference literature:
+  - **Abadie et al. (2010, 2021)**: Synthetic control permutation uses the post/pre MSPE *ratio*
+    (an effect-size statistic), not model p-values [JASA 2010; JEL 2021]
+  - **Linden (2018)**: ITS permutation compares the *magnitude* of trend changes across
+    pseudo-treatments [J Eval Clin Pract, PMID 29460383]
+  - **Young (2019)**: Model p-values inflate under misspecification; randomization inference
+    using effect estimates is robust [QJE 134(2)]
+  - **Fisher (1935)**: Any test statistic is valid for permutation, but effect-size statistics
+    are power-optimal for magnitude alternatives
+- The mechanism: a model p-value = effect / estimated_uncertainty. When uncertainty is
+  systematically underestimated (35-55% FPR), the p-value is distorted at every permuted
+  date equally, so comparing p-values inherits the model's FPR. Effect-size comparison
+  is unaffected because the distortion cancels in the relative ranking.
 - Any spec with permutation-p > 0.10 should be flagged as potentially spurious
 - Include both log_target and raw_target variants per mode (log stabilizes variance, fairer effect-size comparison)
 - Prior experience: masking modes (mask_nov_jan) may pass permutation even when full_none fails,
@@ -622,10 +635,14 @@ verified with a placebo test on the specific dataset.
 | **Permutation p-value** | **≤ 0.10** | **Effect is unusual vs random dates (empirical)** |
 
 > **Both the permutation test and pre-period placebo test are REQUIRED.**
-> - Permutation test: checks if the real date is special vs random dates (empirical significance)
-> - Pre-period placebo test: checks if the MODEL is calibrated (false positive rate)
-> - BSTS p-values alone are unreliable — they can be overconfident with short pre-periods,
->   many covariates, or masking. In one engagement, BSTS p=0.000 corresponded to 22% FPR.
+> - Permutation test (effect-size comparison): checks if the real date produces an unusually
+>   large effect vs random dates. Uses `|abs_eff|` ranking, NOT model p-values.
+> - Pre-period placebo test: checks if the MODEL is calibrated (false positive rate).
+>   Uses model p-values by design — that's what it's measuring.
+> - BSTS p-values alone are unreliable — multi-method testing (BSTS VI/HMC, Prophet, RDiT)
+>   shows 35-55% FPR on daily retail revenue. ALL model classes are miscalibrated.
+> - The permutation test is immune to this miscalibration because effect-size ranking is
+>   unaffected by systematic uncertainty underestimation [Abadie 2010; Young 2019].
 
 Passing all checks = strong result. Passing 4+ with consistent direction = defensible.
 Failing FPR check = model is miscalibrated — find a better-calibrated spec before reporting.
