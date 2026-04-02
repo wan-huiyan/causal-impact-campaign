@@ -44,6 +44,7 @@ composable_with:
   - client-proposal-slide: Pass findings to create stakeholder-ready presentation
   - frontend-design: Build custom interactive dashboards from analysis results
   - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
+  - data-provenance-verifier: Verify external data files (weather, Trends CSVs) are genuine before running analysis. Auto-trigger when inheriting data/ directories with external datasets.
 merged_skills:
   - permutation-validation: v1.1.0 merged into this skill (v2.0.0). Permutation methodology, code templates, and effect-size comparison are now in Step 5 Validate.
   - bsts-placebo-calibration: v1.0.0 merged into this skill (v2.0.0). Placebo test design, FPR interpretation, NaN handling, and FPR-gated ranking are now in Step 5 Validate.
