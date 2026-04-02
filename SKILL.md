@@ -11,8 +11,10 @@ description: |
   asks about measuring the effect of a price change, delivery promo, ad campaign, or any time-bounded
   business action. Trigger on questions like "did the promotion actually increase revenue?",
   "how much additional revenue did the campaign generate?", "is the revenue change from the campaign
-  or just seasonality?", "estimate the ROI of our marketing intervention", or "the p-value is 0.12 —
-  did it work?". This skill covers the full pipeline: data exploration, covariate engineering,
+  or just seasonality?", "estimate the ROI of our marketing intervention", "the p-value is 0.12 —
+  did it work?", "is my BSTS result overfit?", "what's the false positive rate of my model?",
+  "how do I calibrate my causal impact model?", or "validate my permutation test results".
+  This skill covers the full pipeline: data exploration, covariate engineering,
   dual-method analysis (tfcausalimpact + CausalPy), validation, interpretation, and client-facing
   deliverables including interactive HTML explorers with Plotly.js. Even if the user only mentions
   one method, use this skill to ensure robustness through cross-method comparison.
