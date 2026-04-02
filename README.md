@@ -89,7 +89,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 | Skill | Purpose |
 |-------|---------|
 | [data-provenance-verifier](https://github.com/wan-huiyan/data-provenance-verifier) | Verify external data files (weather, Trends CSVs) are genuine before analysis |
-| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs (~$0.50 for 448 specs) |
+| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs (~$3.12 for 448 specs) |
 | [client-proposal-slide](https://github.com/wan-huiyan/claude-client-proposal-slide) | Create stakeholder-ready presentation from findings |
 
 **Merged skills:** `permutation-validation` and `bsts-placebo-calibration` are now built into this skill (v2.0.0). If you have them installed separately, you can uninstall them.
