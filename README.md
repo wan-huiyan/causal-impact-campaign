@@ -1,5 +1,7 @@
 # Causal Impact Campaign
 
+[![version](https://img.shields.io/badge/version-2.1.0-blue)](https://github.com/wan-huiyan/causal-impact-campaign/releases) [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE) [![python](https://img.shields.io/badge/python-3.9--3.12-yellow)](https://www.python.org/) [![eval](https://img.shields.io/badge/eval_assertions-34_passed-brightgreen)](eval-suite.json) [![papers](https://img.shields.io/badge/grounded_in-25%2B_papers-blueviolet)](references/bibliography.md) [![Claude Code](https://img.shields.io/badge/Claude_Code-skill-orange)](https://claude.com/claude-code)
+
 **Measure whether your campaign actually worked — not just "revenue went up."**
 
 Bayesian counterfactual analysis with multi-method validation, permutation testing, and client-ready deliverables. A [Claude Code](https://claude.com/claude-code) skill that automates the full pipeline so you get a defensible estimate instead of a naive before/after comparison.
