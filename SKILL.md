@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "1.9.0"
+version: "2.0.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -40,11 +40,13 @@ idempotency: |
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
 namespace: causal_impact
 composable_with:
-  - permutation-validation: Validate model p-values with empirical permutation tests (REQUIRED before presenting results)
   - cloud-run-batch-experiment: Scale permutation tests and sensitivity analyses to GCP Cloud Run Jobs
   - client-proposal-slide: Pass findings to create stakeholder-ready presentation
   - frontend-design: Build custom interactive dashboards from analysis results
   - gcp-pipeline-cost-analysis: Estimate cost of running analysis at scale
+merged_skills:
+  - permutation-validation: v1.1.0 merged into this skill (v2.0.0). Permutation methodology, code templates, and effect-size comparison are now in Step 5 Validate.
+  - bsts-placebo-calibration: v1.0.0 merged into this skill (v2.0.0). Placebo test design, FPR interpretation, NaN handling, and FPR-gated ranking are now in Step 5 Validate.
 ---
 
 # Causal Impact Campaign Analysis
@@ -514,6 +516,35 @@ Organize into groups, test head-to-head within each group:
 - Include both log_target and raw_target variants per mode (log stabilizes variance, fairer effect-size comparison)
 - Prior experience: masking modes (mask_nov_jan) may pass permutation even when full_none fails,
   because removing high-variance holiday periods creates a cleaner counterfactual baseline
+
+**Permutation code template:**
+
+```python
+def generate_random_dates(df, real_date, post_days, n=50, min_pre=180, seed=42):
+    """Generate random intervention dates, excluding zone around real treatment."""
+    rng = np.random.default_rng(seed)
+    dates = pd.to_datetime(df['date'])
+    earliest = dates.min() + pd.Timedelta(days=min_pre)
+    latest = dates.max() - pd.Timedelta(days=post_days)
+    exclusion = (dates >= real_date - pd.Timedelta(days=2*post_days)) & \
+                (dates <= real_date + pd.Timedelta(days=2*post_days))
+    candidates = dates[(dates >= earliest) & (dates <= latest) & ~exclusion]
+    return sorted(rng.choice(candidates, size=min(n, len(candidates)), replace=False))
+
+def compute_permutation_pvalue(real_effect, null_effects):
+    """Effect-size comparison: count shuffles where |effect| >= |real_effect|."""
+    valid = [e for e in null_effects if e is not None]
+    n_extreme = sum(1 for e in valid if e >= abs(real_effect))
+    return (n_extreme + 1) / (len(valid) + 1)  # +1 correction avoids p=0
+```
+
+**Permutation pitfalls:**
+- Wide masks (mask_nov_jan) inflate model confidence → low BSTS p but high perm p
+- Too many covariates (7+) overfit → use 3-5 orthogonal covariates
+- Weather covariates improve permutation discrimination (help explain variance at random dates)
+- Pre-BF revenue spikes should NOT be masked — they teach the model that spikes can occur naturally
+- NaN from BSTS: apply `raw.replace('NaN', 'null')` before JSON parsing. `gsutil -m cat`
+  silently drops NaN-containing objects in streaming decode
 
 **SCA output should include:**
 1. Spec curve chart: bars sorted by p-value (acceptable if permutation-validated), CI whiskers, colored by significance
