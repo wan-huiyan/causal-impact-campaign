@@ -36,6 +36,9 @@ The skill auto-triggers when you mention "causal impact", "campaign uplift", "di
 - "Is the revenue change from the campaign or just seasonality?"
 - "Estimate the ROI of our marketing intervention"
 - "The p-value is 0.12 — did it work?"
+- "Is my BSTS result overfit?" / "What's the false positive rate?"
+- "How do I calibrate my causal impact model?"
+- "Validate my permutation test results"
 
 ## Installation
 
@@ -237,6 +240,35 @@ The skill verifies before delivering results:
 | `google-cloud-storage` | any | GCS for Cloud Run result collection (optional) |
 
 **Note:** tfcausalimpact and CausalPy must run in separate Python scripts due to incompatible numpy requirements.
+
+## Version History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| **2.1.0** | 2026-04-02 | 34 research-backed eval assertions (25+ papers), trigger keywords for merged content, schliff 100/100 |
+| **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration into unified skill. Moved ~420 lines of reference content to `references/` files (-25% SKILL.md). Added data-provenance-verifier as companion skill. Added CausalPy short-window xarray error handling. |
+| **1.6.0** | 2026-03-25 | SCA (448-spec sweep), VI stochasticity warning, weather interactions, 9 methods |
+| **1.0.0** | 2026-03-15 | Initial release: dual-method (BSTS + CausalPy), covariate safety audit, client deliverables |
+
+## Companion Skills
+
+| Skill | Purpose |
+|-------|---------|
+| [data-provenance-verifier](https://github.com/wan-huiyan/data-provenance-verifier) | Verify external data files (weather, Trends CSVs) are genuine before analysis |
+| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs |
+| [client-proposal-slide](https://github.com/wan-huiyan/client-proposal-slide) | Create stakeholder-ready presentation from findings |
+
+## Eval Suite
+
+The skill includes a **research-backed eval suite** (`eval-suite.json`) with:
+- **34 assertion tests** grounded in 25+ academic papers (Abadie 2010/2021, Young 2019, Brodersen 2015, Eggers 2024, Makowski 2019, Roth 2022, Simonsohn 2020, and more)
+- **41 trigger tests** (27 positive, 14 negative)
+- **6 test cases** with 20 pattern assertions
+- **5 edge cases** (minimal input, concurrent interventions, insufficient data, stakeholder conflict, low granularity)
+
+Categories: methodology (7), validation (9), covariates (5), interpretation (7), client_framing (3), edge_cases (3).
+
+Schliff composite score: **100/100** (all 6 dimensions at 100).
 
 <details>
 <summary>References & Credits</summary>

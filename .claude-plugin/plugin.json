@@ -1,7 +1,7 @@
 {
   "name": "causal-impact-campaign",
-  "description": "Measure the causal impact of marketing campaigns, promos, or interventions on business metrics using Bayesian structural time series. Full pipeline: data exploration, covariate engineering, 9-method analysis, Specification Curve Analysis (440-spec robustness sweep), permutation validation, and client-facing deliverables.",
-  "version": "1.6.0",
+  "description": "Measure the causal impact of marketing campaigns, promos, or interventions on business metrics using Bayesian structural time series. Full pipeline: data exploration, covariate engineering, 9-method analysis, Specification Curve Analysis (448-spec robustness sweep), permutation validation, placebo calibration, and client-facing deliverables. Includes merged permutation-validation and bsts-placebo-calibration skills.",
+  "version": "2.1.0",
   "author": {
     "name": "Huiyan Wan"
   },
@@ -13,6 +13,9 @@
     "bayesian",
     "marketing-analytics",
     "campaign-measurement",
+    "permutation-test",
+    "placebo-calibration",
+    "specification-curve",
     "ga4",
     "claude-code-skill"
   ]
