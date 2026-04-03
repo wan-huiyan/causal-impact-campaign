@@ -307,7 +307,7 @@
     {
       "id": "assert-sca-joint-inference",
       "description": "Proportion of positive specs is not a p-value without joint test",
-      "prompt": "My SCA across 448 specs shows 87% positive direction and 87 specs with p<0.05. Only 6 specs are negative. Isn't that strong evidence? Can I report this as statistically validated?",
+      "prompt": "My SCA across 440 specs shows 87% positive direction and 87 specs with p<0.05. Only 6 specs are negative. Isn't that strong evidence? Can I report this as statistically validated?",
       "expected_behavior": "Must explain that direction consistency is qualitatively compelling but does not replace formal inference. The correct SCA inference requires a shuffle test: permute the outcome, rerun all specs, compute the fraction of shuffles where as many specs are significant as observed. Without that joint test, cannot claim p-level significance from spec proportions alone.",
       "must_contain": ["joint", "shuffle"],
       "must_not_contain": ["yes that's statistically validated"],

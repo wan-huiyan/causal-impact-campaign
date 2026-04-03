@@ -56,7 +56,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 |------|-------------|----------------|
 | [Google CausalImpact](https://google.github.io/CausalImpact/) (R) | Single-method BSTS | Multi-method validation, covariate safety audit, permutation testing, FPR calibration |
 | [tfcausalimpact](https://github.com/WillianFuks/tfcausalimpact) (Python) | Python port, simple API | Same as above, plus automated covariate engineering and client deliverables |
-| [Meta GeoLift](https://github.com/facebookincubator/GeoLift) | Geo-level synthetic control | Works on single time series (no geo holdout needed), 448-spec robustness sweep |
+| [Meta GeoLift](https://github.com/facebookincubator/GeoLift) | Geo-level synthetic control | Works on single time series (no geo holdout needed), 440-spec robustness sweep |
 | [CausalPy](https://github.com/pymc-labs/CausalPy) | Bayesian ITS + RDiT | Wraps CausalPy as one of 4+ methods, adds the validation layer on top |
 
 ## How It Works
@@ -78,7 +78,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 
 2. **Covariate safety audit catches the #1 silent failure.** A covariate that changed during the intervention absorbs your causal effect, biasing estimates toward zero. The skill tests each covariate and flags INCLUDE/CAUTION/SKIP.
 
-3. **448-spec Specification Curve Analysis.** Instead of reporting one cherry-picked p-value, the skill tests all analytical "forking paths" — 55 covariate bundles x 8 infrastructure combos — and reports the full distribution.
+3. **440-spec Specification Curve Analysis.** Instead of reporting one cherry-picked p-value, the skill tests all analytical "forking paths" — 55 covariate bundles x 8 infrastructure combos — and reports the full distribution.
 
 4. **Honest reporting framework.** Converts p-values to "probability of positive effect" for non-technical stakeholders. Distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results. Never claims significance you don't have.
 
@@ -89,7 +89,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 | Skill | Purpose |
 |-------|---------|
 | [data-provenance-verifier](https://github.com/wan-huiyan/data-provenance-verifier) | Verify external data files (weather, Trends CSVs) are genuine before analysis |
-| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs (~$3.12 for 448 specs) |
+| [cloud-run-batch-experiment](https://github.com/wan-huiyan/cloud-run-batch-experiment) | Scale permutation tests and SCA to GCP Cloud Run Jobs (~$3.07 for 440 specs) |
 | [client-proposal-slide](https://github.com/wan-huiyan/claude-client-proposal-slide) | Create stakeholder-ready presentation from findings |
 
 **Merged skills:** `permutation-validation` and `bsts-placebo-calibration` are now built into this skill (v2.0.0). If you have them installed separately, you can uninstall them.
@@ -100,7 +100,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 |---------|------|---------|
 | **2.1.0** | 2026-04-02 | 34 research-backed eval assertions, trigger keywords for merged content |
 | **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration, reference files architecture, data-provenance-verifier companion |
-| **1.6.0** | 2026-03-25 | SCA (448-spec sweep), VI stochasticity warning, 9 methods |
+| **1.6.0** | 2026-03-25 | SCA (440-spec sweep), VI stochasticity warning, 9 methods |
 | **1.0.0** | 2026-03-15 | Initial release: dual-method analysis, covariate safety audit, client deliverables |
 
 <details>
@@ -127,7 +127,7 @@ The SCA tests all analytical "forking paths" across two dimensions:
 
 **Enrichments (55 bundles in 6 groups):** DoW encoding, calendar signals, weather, external signals (Google Trends), sale detection, transforms.
 
-Output: spec curve chart (448 bars sorted by effect, CI whiskers), indicator matrix, dimension impact analysis, permutation p-values for top specs.
+Output: spec curve chart (440 bars sorted by effect, CI whiskers), indicator matrix, dimension impact analysis, permutation p-values for top specs.
 
 </details>
 
