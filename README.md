@@ -98,6 +98,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **2.2.0** | 2026-04-07 | New section: "Data-Prep Zero-Injection Trap" — latent bug class where `mask` + `prep_df` silently fills masked days with `y=0` + interpolated covariates instead of removing them. Affects all methods except RDiT (which uses a local bandwidth window). Includes reproduction recipe, verification pattern, and 4 fix options. Discovered via the Schuh retail engagement (Issue #51). Pitfall #13 added. Prior "masking passes permutation" guidance corrected. FPR section updated with caveat. |
 | **2.1.0** | 2026-04-02 | 34 research-backed eval assertions, trigger keywords for merged content |
 | **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration, reference files architecture, data-provenance-verifier companion |
 | **1.6.0** | 2026-03-25 | SCA (440-spec sweep), VI stochasticity warning, 9 methods |
