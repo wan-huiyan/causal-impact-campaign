@@ -10,13 +10,43 @@ Bayesian counterfactual analysis with multi-method validation, permutation testi
 
 ## Install
 
-```bash
-# Claude Code
-claude skill install wan-huiyan/causal-impact-campaign
+This skill is distributed as a Claude Code **plugin**. Installation is two steps: add the marketplace, then install the plugin.
 
-# Or clone directly
-git clone https://github.com/wan-huiyan/causal-impact-campaign.git ~/.claude/skills/causal-impact-campaign
+### Inside a Claude Code session (recommended)
+
+```text
+/plugin marketplace add wan-huiyan/causal-impact-campaign
+/plugin install causal-impact-campaign@wan-huiyan-causal-impact-campaign
 ```
+
+### From the terminal
+
+```bash
+# 1. Register this repo as a marketplace (one-time)
+claude plugin marketplace add wan-huiyan/causal-impact-campaign
+
+# 2. Install the plugin
+claude plugin install causal-impact-campaign@wan-huiyan-causal-impact-campaign
+```
+
+### Updating to the latest version
+
+```bash
+# Refresh the marketplace catalog, then update the installed plugin
+claude plugin marketplace update wan-huiyan-causal-impact-campaign
+claude plugin update causal-impact-campaign@wan-huiyan-causal-impact-campaign
+```
+
+### Alternative: clone directly
+
+```bash
+git clone https://github.com/wan-huiyan/causal-impact-campaign.git \
+  ~/.claude/skills/causal-impact-campaign
+```
+
+> **Note:** The plugin name is `causal-impact-campaign` (from `plugin.json`). The marketplace name is `wan-huiyan-causal-impact-campaign` (from `marketplace.json`). They look similar but are different — the `@marketplace` suffix is required when installing.
+>
+> `claude skill install` is deprecated; use `claude plugin install` instead.
 
 **Requires:** Claude Code, Python 3.9+. Optional: GCP project for Cloud Run batch processing.
 
