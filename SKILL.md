@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "2.0.0"
+version: "2.2.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -518,8 +518,17 @@ Organize into groups, test head-to-head within each group:
   is unaffected because the distortion cancels in the relative ranking.
 - Any spec with permutation-p > 0.10 should be flagged as potentially spurious
 - Include both log_target and raw_target variants per mode (log stabilizes variance, fairer effect-size comparison)
-- Prior experience: masking modes (mask_nov_jan) may pass permutation even when full_none fails,
-  because removing high-variance holiday periods creates a cleaner counterfactual baseline
+- Prior experience (CORRECTED 2026-04-07): masking modes (mask_nov_jan / mask_bf_jan) tend to
+  produce LOW model p-values but HIGH permutation p-values — contrary to what you might expect.
+  Originally attributed to "removing high-variance holiday periods creates a cleaner counterfactual
+  baseline," but the Schuh investigation (Issue #51) traced the root cause to a latent zero-injection
+  bug in `prep_df`. After `apply_date_mask` drops rows, `prep_df` reindexes to a continuous daily
+  index and fills the reinserted rows with `y=0` + interpolated covariates. The model then trains
+  on fake zero-revenue winters, which teaches a spurious covariate→target relationship and inflates
+  both real and shuffle effects. **Mask modes should not be used until this bug is fixed in your
+  specific implementation** — see the "Data-Prep Zero-Injection Trap" section below. Prefer
+  contiguous pre-period windows (e.g., post-Xmas trimmed Jan 6 → treatment) which avoid the bug
+  entirely.
 
 **Permutation code template:**
 
@@ -626,8 +635,14 @@ The miscalibration is **model-class-independent**, not specific to BSTS VI:
 Pre-period mode also doesn't fix it:
 - ~50 days pre-period (post-Xmas trimmed): FPR ~22%
 - ~700 days full pre-period (no mask): FPR ~39%
-- ~700 days with mask_bf_jan: FPR ~93% (masking creates gaps)
-- Guideline: **ALL tested methods produce 35-55% FPR on daily retail revenue.**
+- ~700 days with mask_bf_jan: FPR ~93% (⚠️ CORRECTED: originally attributed to "masking creates
+  gaps" — the Schuh Issue #51 investigation showed this is partially a data-prep zero-injection
+  bug, not a fundamental property of mask modes. After the fix, this number is expected to drop
+  substantially. See the "Data-Prep Zero-Injection Trap" section for details.)
+- Guideline: **ALL tested methods produce 35-55% FPR on daily retail revenue.** (⚠️ CAVEAT: these
+  numbers were measured in pipelines that may contain the zero-injection bug. The "all methods
+  miscalibrated" finding is robust for non-mask modes, but the mask-mode FPR numbers should be
+  re-measured after verifying your mask is a true removal.)
   Pre-period length, inference method, and model class don't fix the root cause
   (strong autocorrelation + complex seasonal patterns in daily data).
 - When ALL methods are miscalibrated, shift to alternative evidence: direction consistency,
@@ -1158,6 +1173,150 @@ A client who reloads the page and sees different numbers will question everythin
     internal reference document (ANALYSIS_FINDINGS.md exec summary, narrative sections) in the SAME
     commit as the deliverables. Auditors and new team members read the internal doc first. If it still
     leads with the old framing, the reframing looks cosmetic.
+
+13. **Data-prep "mask" functions that silently fill instead of remove** — When your pipeline has an
+    `apply_date_mask` step followed by a `prep_df` / `preprocess` step, the mask may not actually
+    reach the model as a removal. A common latent bug: `apply_date_mask` drops rows correctly, then
+    `prep_df` rebuilds a continuous daily index (`pd.date_range(min, max, freq="D")` + `reindex`) and
+    fills the reinserted rows with `y = 0` and linear-interpolated covariates. The model then trains
+    on 66 days/year of fake zero revenue with smoothly walking Fourier/Trends, learning a spurious
+    "winter covariates ↔ £0 revenue" relationship. This was discovered as a latent bug in a real
+    retail engagement and filed as a priority:high issue. See the dedicated section below for the
+    full case study, reproduction recipe, and verification pattern. ALWAYS trace the masked date
+    path through the entire prep pipeline to the model-input layer before trusting the mask.
+
+## The Data-Prep Zero-Injection Trap (Case Study + Verification Recipe)
+
+**Context:** A "mask" step in a causal impact pipeline is supposed to remove high-variance periods
+(Christmas, Black Friday) from the model fit so credible intervals aren't inflated. If the mask
+is implemented naively, it may silently fail in a way that LOOKS correct but distorts every
+downstream method.
+
+**The bug class (generalisable):**
+
+```python
+# Step 1: "Mask" function correctly drops rows
+def apply_date_mask(df, d_col, mask_mode):
+    if mask_mode == "mask_nov_jan":
+        in_mask = ((df[d_col].dt.month == 11) |
+                   (df[d_col].dt.month == 12) |
+                   ((df[d_col].dt.month == 1) & (df[d_col].dt.day <= 5)))
+        return df[~in_mask].reset_index(drop=True)   # ← crops as expected
+
+# Step 2: prep_df rebuilds a continuous index and fills the gaps
+def prep_df(df, d_col, y_col, x_cols, ...):
+    d = df.set_index(d_col).sort_index()
+    idx = pd.date_range(d.index.min(), d.index.max(), freq="D")
+    d = d.reindex(idx)                               # ← REINSERTS MASKED DATES AS NaN
+    d[y_col] = d[y_col].fillna(0)                    # ← REVENUE = 0 for masked days
+    d[x_num] = (d[x_num]
+                  .interpolate(method="linear", ...)
+                  .bfill().ffill().fillna(0))        # ← COVARIATES INTERPOLATED
+    return d
+
+# Step 3: All methods dispatch from the same prepped dataframe
+d = prep_df(df, ...)       # zero-injected here
+run_bsts(d, ...)           # sees 66 days/year of fake £0 + interpolated covariates
+run_prophet(d, ...)        # same
+run_causalpy(d, ...)       # same
+```
+
+**What the model actually sees (example, Elena's config 2024-01-01 → 2026-02-26):**
+
+```
+2024-10-31   £8,254   trend=30.3   ← last real day
+2024-11-01   £    0   trend=30.6   ← reinserted, rev=0, trend interpolated
+2024-11-15   £    0   trend=35.2   ← 2 weeks into "mask," trend walks up
+2024-12-25   £    0   trend=48.1   ← Christmas Day: revenue = £0 in the training data
+2025-01-05   £    0   trend=51.6   ← last masked day
+2025-01-06   £10,455  trend=51.9   ← real again
+```
+
+**Consequences:**
+
+1. **Spurious covariate→target learning.** The model learns "when Fourier/Trends indicate Nov-Dec,
+   revenue is £0." This is a fake signal that biases the counterfactual for EVERY post-treatment
+   prediction.
+2. **Inflated pre-period posterior variance.** The model sees revenue swing from ~£10K → £0 → ~£10K
+   twice per year, widening credible intervals dramatically.
+3. **Permutation test amplification.** Shuffled placebo treatments inherit the distorted fit.
+   In the retail case study, the top placebo shuffle produced +£2.1M vs a real effect of +£328K
+   (6.5x larger), yielding permutation p = 0.47.
+4. **False positive rate inflation.** Part of the "mask_bf_jan produces 93% FPR" observation
+   (previously thought to be about "masking creates gaps") is actually this zero-injection bug.
+
+**Which methods are affected?**
+
+The bug is at the **data-prep layer**, so every method that consumes the prepped dataframe is
+affected, regardless of its internal architecture:
+
+| Method | Affected? | Why |
+|---|---|---|
+| BSTS VI / HMC (tfcausalimpact) | **YES** — severe | Fits state-space on full pre-period including zero-injected rows |
+| Prophet | **YES** | Fits zeros as real observations; distorts trend + yearly seasonality |
+| CausalPy LR (Bayesian regression) | **YES** — possibly worse | No temporal smoothing; linear fit pulls trend toward zero |
+| Conformal VI | **YES** — severe | BSTS backbone + conformal quantile over pre-period residuals (double hit) |
+| **RDiT local linear** | **NO** (if bandwidth doesn't overlap mask) | Uses only a narrow window around the treatment date — doesn't touch the masked period |
+
+**RDiT is the only bug-independent baseline** when its bandwidth window doesn't overlap any masked
+period. This has a strong implication: if your multi-method comparison shows BSTS/Prophet/CausalPy
+agreeing (e.g., +38% uplift) while RDiT disagrees (e.g., +0.1%), RDiT may be the one reading the
+true signal — the others are all sharing the same bugged input.
+
+**The "HMC confirms VI" trap:** switching between variational inference and HMC sampling does NOT
+fix this bug. Both samplers train on the same zero-injected dataframe. Apparent "independent
+confirmation" via HMC is not independent at all — it only rules out sampler stochasticity, not
+data-prep bugs.
+
+**Verification recipe — always run this before trusting a mask mode:**
+
+```python
+# 1. Create synthetic data matching your pre-period window
+import pandas as pd, numpy as np
+dates = pd.date_range("2024-01-01", "2026-02-28", freq="D")
+df = pd.DataFrame({
+    "date": dates,
+    "revenue": 10000 + 2000*np.sin(2*np.pi*np.arange(len(dates))/365),
+    "trend":   50    + 20  *np.sin(2*np.pi*np.arange(len(dates))/365),
+})
+
+# 2. Apply your mask
+masked = apply_date_mask(df, "date", "mask_nov_jan")
+print(f"After apply_date_mask: {len(masked)} rows")   # should be ~66*years less
+
+# 3. Apply prep_df
+prepped = prep_df(masked, d_col="date", y_col="revenue", x_cols=["trend"])
+print(f"After prep_df:         {len(prepped)} rows")  # if SAME as original = BUG
+
+# 4. Inspect what the model actually receives
+print(prepped.loc["2024-10-30":"2025-01-08"])
+# If you see Nov-Dec rows with revenue=0 and interpolated covariates, the mask is
+# not actually masking — it's zero-injecting. FIX REQUIRED.
+```
+
+**If you find this bug in your pipeline:**
+
+- **Option A (quick spike):** Change `d[y_col] = d[y_col].fillna(0)` to leave NaN. Test whether
+  tfcausalimpact / your BSTS library tolerates missing y values. Some state-space libraries do.
+- **Option B (clean):** Segmented BSTS fit — split the pre-period into contiguous chunks, fit a
+  separate BSTS per chunk, then combine counterfactuals for the post-period. Statistically clean
+  but a significant refactor.
+- **Option C (simplest):** Deprecate the mask mode entirely. Use only contiguous pre-period
+  windows (e.g., "post-Xmas trimmed": Jan 6 → treatment date). This is the approach the Schuh
+  project adopted for its lead spec after discovering the bug.
+- **Option D (stopgap):** Rename the mode to `fill_nov_jan_zero` so the behaviour matches the
+  name, and document prominently that it is not equivalent to removing those days.
+
+**Client-communication rule:** never say "we masked Christmas out" if your implementation uses
+the zero-injection pattern. The accurate description is "we excluded the Nov-Jan period from the
+treatment comparison" — and if you know the implementation is affected, add a caveat or footnote.
+
+**Meta-lesson:** When a function is named `mask_X` / `filter_X` / `drop_X` and is used upstream
+of a model fit, ALWAYS trace the full pipeline through to where the model receives the data.
+Check for: (a) reindex operations that reinsert removed dates, (b) fillna / interpolate calls
+that populate gaps, (c) any continuous-frequency assumptions (daily, weekly) that force gap-filling.
+A "mask" in the data-prep sense often becomes a "fill" at the model-input sense. Describe
+mask behaviour by what the MODEL sees, not by what the intermediate dataframe looks like.
 
 ## Multi-Method Pipeline Gotchas (v1.4.0)
 
