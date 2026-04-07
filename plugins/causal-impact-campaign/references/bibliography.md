@@ -41,3 +41,30 @@
 - [Gelman & Yao, 2021] Gelman, A., Yao, Y. "Holes in Bayesian statistics." *Journal of Physics G*, 48(1). arXiv:2002.06467. — Pr(effect > 0) overstates certainty with flat priors.
 - [Muehlemann et al., 2023] Muehlemann, N. et al. "A tutorial on modern Bayesian methods in clinical trials." *Therapeutic Innovation & Regulatory Science* (PMC10117244). — Recommends posterior probabilities over p-values for non-technical audiences.
 - [Ruberg, 2021] Ruberg, S.J. "Detente: a practical understanding of p values and Bayesian posterior probabilities." *Clinical Pharmacology & Therapeutics*, 109(6), 1489-1498 (PMC8246739).
+
+## Posterior Predictive p-values (Bayesian Model Criticism)
+
+- [Gelman, Meng & Stern, 1996] Gelman, A., Meng, X.-L., Stern, H. "Posterior predictive assessment of model fitness via realized discrepancies." *Statistica Sinica*, 6, 733–807. — The canonical framework for posterior predictive checks. The `tfcausalimpact` `compute_p_value` function in `causalimpact/inferences.py` is an instance of this framework (the package documentation does not say so).
+- [Robins, van der Vaart & Ventura, 2000] Robins, J.M., van der Vaart, A., Ventura, V. "Asymptotic distribution of p values in composite null models." *JASA*, 95(452), 1143–1156. DOI: 10.1080/01621459.2000.10474310. — Foundational result that posterior predictive p-values are conservative under composite nulls (cluster around 0.5, not uniformly distributed). Cite this when a methodology write-up treats a BSTS p-value as a frequentist Type-I error rate.
+- [Bayarri & Berger, 2000] Bayarri, M.J., Berger, J.O. "P-values for composite null models." *JASA*, 95(452), 1127–1142. — Companion paper proposing partial-posterior-predictive and conditional-predictive p-values that ARE asymptotically uniform under the null. `tfcausalimpact` does not implement these.
+- [Phipson & Smyth, 2010] Phipson, B., Smyth, G.K. "Permutation p-values should never be zero: calculating exact p-values when permutations are randomly drawn." *Statistical Applications in Genetics and Molecular Biology*, 9(1), Article 39. PubMed: 21044043. arXiv: 1603.05766. — Justification for the `(k+1)/(N+1)` Monte-Carlo correction used by `tfcausalimpact` internally and by most permutation aggregators.
+
+## Randomization Inference & Fisher's Sharp Null
+
+- [Fisher, 1935] Fisher, R.A. *The Design of Experiments.* Edinburgh: Oliver & Boyd. — Historical origin of randomization inference.
+- [Imbens & Rubin, 2015] Imbens, G.W., Rubin, D.B. *Causal Inference for Statistics, Social, and Biomedical Sciences.* Cambridge University Press. DOI: 10.1017/CBO9781139025751. — Chapter 5, "Fisher's Exact P-Values for Sharp Null Hypotheses", is the textbook treatment of randomization inference under the sharp null `H_0: τ_t = 0 for all t in post`. The right framework for thinking about any date-shuffled randomization test.
+
+## Specification Curve & Multiverse Analysis
+
+- [Simonsohn, Simmons & Nelson, 2020] Simonsohn, U., Simmons, J.P., Nelson, L.D. "Specification curve analysis." *Nature Human Behaviour*, 4(11), 1208–1214. DOI: 10.1038/s41562-020-0912-z. — The canonical SCA paper. Three-step procedure: (1) enumerate defensible specs, (2) display the curve sorted by effect size with a descriptor matrix, (3) conduct a bootstrap-based joint inference test. Most projects implement 1-2 only; claim "Simonsohn-validated" only if joint inference is run.
+- [Steegen, Tuerlinckx, Gelman & Vanpaemel, 2016] Steegen, S., Tuerlinckx, F., Gelman, A., Vanpaemel, W. "Increasing transparency through a multiverse analysis." *Perspectives on Psychological Science*, 11(5), 702–712. DOI: 10.1177/1745691616658637. — The data-processing-decision counterpart to SCA. Varying data-processing choices (exclusions, recoding, transformations) rather than modelling choices.
+- [Gelman & Loken, 2013] Gelman, A., Loken, E. "The garden of forking paths: Why multiple comparisons can be a problem, even when there is no 'fishing expedition' or 'p-hacking' and the research hypothesis was posited ahead of time." Working paper, Columbia Department of Statistics. [Columbia PDF](https://sites.stat.columbia.edu/gelman/research/unpublished/p_hacking.pdf). — Conceptual umbrella: even an honest single analysis is implicitly multiple comparisons because of the data-contingent decisions a researcher *would have* made on a different sample. Especially relevant to "find a better spec via the spec curve" failure modes.
+
+## Bayesian Inference Theory & Type S/M Errors
+
+- [Gelman & Carlin, 2014] Gelman, A., Carlin, J. "Beyond power calculations: Assessing Type S (sign) and Type M (magnitude) errors." *Perspectives on Psychological Science*, 9(6), 641–651. DOI: 10.1177/1745691614551642. — Argues that for low-power studies, Type-S (sign) and Type-M (magnitude) errors matter more than Type-I. Highly relevant for short-window single-unit causal-impact analyses.
+- [Blei, Kucukelbir & McAuliffe, 2017] Blei, D.M., Kucukelbir, A., McAuliffe, J.D. "Variational Inference: A Review for Statisticians." *JASA*, 112(518), 859–877. DOI: 10.1080/01621459.2017.1285773. — Canonical VI review. Establishes that variational inference underestimates posterior variance, which makes CIs too narrow and posterior predictive p-values too small. Use as the citation when recommending HMC over VI for headline results.
+
+## Forecasting & Time Series Cross-Validation
+
+- [Hyndman & Athanasopoulos, 2021] Hyndman, R.J., Athanasopoulos, G. *Forecasting: Principles and Practice*, 3rd ed. OTexts. Chapter 5.10, "Time series cross-validation". [https://otexts.com/fpp3/tscv.html](https://otexts.com/fpp3/tscv.html). — The standard reference for rolling-origin cross-validation. Important caveat: H&A treats rolling-origin CV as the standard for *forecast accuracy evaluation*, not as a placebo significance test. When a methodology write-up cites H&A to justify a "backtest as primary placebo" framing, it's a category error.
