@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "2.2.0"
+version: "2.3.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -1363,6 +1363,212 @@ Then generate: minimal (1 session covariate), calendar-only, seasonality-only,
 calendar+seasonality, full, without-paid, kitchen-sink. Test across 2+ pre-period
 start dates. Report the FULL range and median, not just the best result.
 
+## Methodology Communication — Explaining Your Tests Honestly
+
+Methodology write-ups for causal-impact analyses routinely make the same handful of mistakes:
+they mis-state what the BSTS p-value actually is, they skip identification assumptions entirely,
+they treat "passes placebo" and "passes permutation" as two rungs of the same ladder, and they
+respond to a failing test by spec-shopping. This section is the antidote. It's what you should
+say — and what you should avoid saying — when you write a methodology section, a client deck,
+or an internal teaching note.
+
+### The `tfcausalimpact` p-value is NOT what you think
+
+The single most common error in methodology write-ups is describing the BSTS p-value as:
+
+```
+p = (1/N) × #{posterior samples where effect ≤ 0}         ← WRONG
+```
+
+That formula is wrong in three independent ways. The actual formula in `tfcausalimpact`
+(source: `causalimpact/inferences.py`, function `compute_p_value`) is:
+
+```python
+sim_sum = tf.reduce_sum(simulated_ys, axis=1)         # post-period sum per sim
+signal  = min(
+    np.sum(sim_sum > post_data_sum),                   # upper-tail count
+    np.sum(sim_sum < post_data_sum),                   # lower-tail count
+)
+return signal / (len(simulated_ys) + 1)
+```
+
+In math:
+
+```
+p = min( #{sim_sum_i > obs_sum},  #{sim_sum_i < obs_sum} )  /  (N + 1)
+```
+
+Three things matter:
+
+1. **It is two-sided**, not one-sided. The `min(upper_tail, lower_tail)` clearly takes a
+   minimum of the two tail counts.
+2. **The denominator is `N + 1`**, not `N`. This is the [Phipson & Smyth, 2010] Monte-Carlo
+   correction so the value can never equal exactly 0.
+3. **The compared quantity is the post-period sum, not the "effect"**. It counts simulated
+   counterfactual post-period sums against the actual observed post-period sum, not samples
+   of a derived "effect ≤ 0" quantity.
+
+A sanity check: if you see `p = 0.005`, that's almost certainly `5 / 1001` with `N = 1000` sims
+— no other obvious numerator/denominator combination produces `0.004995…` from the wrong formula
+people usually write down.
+
+**Read it as a posterior predictive p-value** in the sense of [Gelman, Meng & Stern, 1996], not
+as a frequentist p-value. Unlike a frequentist p-value, posterior predictive p-values are **not
+uniformly distributed under the null even asymptotically** when the null is composite (which
+BSTS's is, with many nuisance parameters). They are conservative and tend to **cluster around
+0.5** [Robins, van der Vaart & Ventura, 2000; Bayarri & Berger, 2000]. So a value of 0.005 is
+*stronger* evidence than a frequentist p of 0.005 in one direction (it's harder for a PPP to
+fall below 0.05 by chance) and *less interpretable as a calibrated false-positive rate* in the
+other (it isn't a Type-I error rate). Comparing it to the conventional 0.05 cutoff is a
+convention imported from frequentist NHST, not a property of the quantity.
+
+**When to prefer HMC over VI**: `tfcausalimpact` supports both variational inference (VI, fast)
+and Hamiltonian Monte Carlo (HMC, slower but better-calibrated). VI is known to
+**underestimate posterior variance** [Blei, Kucukelbir & McAuliffe, 2017], which makes CIs too
+narrow and posterior predictive p-values smaller than they should be. When the headline number
+matters, prefer HMC. When iterating on spec exploration, VI is fine — just don't cite a VI
+p-value in a client deck without an HMC re-run.
+
+**The simpler Bayesian alternative** — the quantity most write-ups *wish* they were describing
+— is the posterior probability of direction:
+
+```
+p_d = max( Pr(effect > 0 | y),  Pr(effect < 0 | y) )
+```
+
+This is cheap to compute from `ci.inferences['point_effects']` and [Makowski et al., 2019]
+formalise it as a Bayesian index of effect existence. Report it as *"Probability that the effect
+is positive: 87%"* rather than forcing a p-value word onto a Bayesian quantity.
+
+### Identification assumptions: state them, or you're not doing causal inference
+
+Any methodology write-up that does not enumerate its identification assumptions is not a
+causal-inference document — it's a prediction document with a misleading label. The minimum set
+for a BSTS causal-impact analysis:
+
+1. **Sharp intervention.** The treatment effect is zero outside `[real_start, real_end]` and
+   present on every day inside it. No anticipation, no carryover.
+2. **No interference (SUTVA in time).** The pre-period contains no residual effects from
+   earlier campaigns. Any mask you apply is assumed to cover all such past effects.
+3. **Covariate exogeneity.** Your covariates are not themselves caused by the treatment, or by
+   anything that also causes the outcome. This is the "bad controls" problem in the
+   Angrist-Pischke sense — conditioning on a post-treatment variable biases the effect estimate.
+4. **Pre-period regime stationarity.** The data-generating process for the earliest pre-period
+   is exchangeable with the data-generating process for the latest pre-period. Any permutation
+   or rolling test assumes this; seasonality + trend in real retail data often break it.
+5. **Mask non-informativeness.** If you mask high-variance periods (Nov-Dec, Black Friday), you
+   assume the mask removes dates at random with respect to the residual structure. **Issue #51
+   in the Schuh engagement was a concrete violation of this** — the masked dates were silently
+   re-injected as £0 revenue, which taught BSTS a spurious "winter ↔ £0" relationship. See "The
+   Data-Prep Zero-Injection Trap" section above for the case study. If you're doing anything
+   more sophisticated than "drop the rows", verify the mask actually reached the model input.
+6. **Randomization-test exchangeability.** Any permutation / date-shuffled placebo test
+   additionally requires that fake training windows are exchangeable with the real training
+   window. In a rolling-origin sweep this is usually violated — training window length is a
+   confounder — and the test becomes conservative rather than calibrated. More on this below.
+
+**Rule:** a methodology section that doesn't list these in one place (or an explicit subset) is
+a methodology section you shouldn't ship.
+
+### Three tests, three different questions — not three rungs of a ladder
+
+The four commonly-used validation checks in BSTS causal-impact work answer different questions
+under different validity assumptions. They are not interchangeable. A write-up that frames them
+as "primary test X + fallback tests Y, Z" is smuggling an implicit judgment about which test
+"really counts". Don't do that.
+
+| Test | Asks | Validity hinges on |
+|---|---|---|
+| **Model p-value** (posterior predictive) | Under the model's own posterior predictive distribution, is the observed post-period sum unusual? | Model + prior correctness; NOT a frequentist Type-I rate |
+| **Rolling placebo** (in-time, recent) | Would this model have falsely detected an effect on a recent no-treatment window near the real date? | Recent pre-period being a representative replicate of post-period (no anticipation, no recent regime shift) |
+| **Date-shuffled randomization** (Monte-Carlo in-time placebo) | Across random fake treatment dates drawn from the full pre-period, how unusual is the observed effect magnitude? | Exchangeability of the response across time *and* training-window length not confounding the null — both typically violated for retail time series |
+| **Specification grid** (partial SCA) | Across many defensible modelling specifications on the same real data, do we agree on sign and magnitude? | Defensible specs were enumerated *before* seeing the result; see [Simonsohn, Simmons & Nelson, 2020] |
+
+Three things to keep straight when teaching these to a stakeholder:
+
+- **Model p-value is Bayesian.** Don't write it as `Pr(effect ≤ 0 | model, data)` — that's
+  neither what the code computes nor what you want. Use the formula above or just call it
+  "posterior probability of direction".
+- **"Rolling placebo" is not the same as "rolling-origin cross-validation"**. [Hyndman &
+  Athanasopoulos, 2021] treats rolling-origin CV as the standard for *forecast accuracy
+  evaluation*, not for placebo significance. Calling your placebo test a "backtest" borrows a
+  name from forecasting that doesn't carry the same inferential guarantees.
+- **"Permutation test" is a misnomer** for what most BSTS pipelines do. The canonical
+  permutation test [Fisher, 1935; Imbens & Rubin, 2015, ch.5] exchanges treatment-vs-control
+  *labels across units* assuming exchangeability under the sharp null. A date-shuffled test on
+  a single time series exchanges *fake treatment dates across time within one unit* — closer
+  in spirit to the in-time placebo of [Abadie, Diamond & Hainmueller, 2010] / [Eggers, Tuñón
+  & Dafoe, 2024]. Rename it "date-shuffled randomization test" in client-facing write-ups.
+- **Specification grid ≠ specification curve analysis**. A full [Simonsohn, Simmons & Nelson,
+  2020] SCA is a three-step procedure: enumerate specs, display the curve, compute a
+  bootstrap-based **joint inference test** across the curve. Most projects (this one included)
+  implement steps 1 and 2 + per-spec permutation tests on the top specs — which is closer to a
+  [Steegen, Tuerlinckx, Gelman & Vanpaemel, 2016] multiverse-of-modelling than a canonical
+  spec curve. Don't claim "Simonsohn-validated" unless you've run the joint test.
+
+### Diagnose, don't demote
+
+When model-p passes but a placebo test fails, the dominant reaction in practitioner workflows
+is to spec-shop: run the SCA grid, find the spec that passes all the tests, promote it to the
+headline, "demote" the original canonical. **This is the failure mode [Simonsohn, Simmons &
+Nelson, 2020] and [Gelman & Loken, 2013] (the "garden of forking paths") were explicitly
+designed to surface.** Post-hoc selection on a test statistic is mild p-hacking whether you
+mean it that way or not.
+
+The honest response is:
+
+1. **Diagnose the failure** before reacting. For a failing date-shuffled test, re-run with
+   **training-window length matched** to the real fit (e.g., constrain `fake_start - pre_start
+   ≥ 600 days`). If the p flips to passing, the original FAIL was a low-power artefact from
+   training-length confounding, not genuine model over-confidence. If it still fails, the
+   model really does produce large effects on no-treatment dates and you have a level-shift
+   problem, not a "permutation-fragile" hand-wave.
+2. **Decompose placebo failure into bias and variance.** Bin placebos by training-window
+   length (e.g. <1 yr, 1–1.5 yr, 1.5–2 yr) and report mean and SD of fake effects per bin.
+   - High bias, low variance → real model over-confidence (the failure is genuine)
+   - Low bias, high variance → estimator variance; the test has no power (the failure is a
+     low-power artefact, not over-confidence)
+   - High bias, high variance → regime non-stationarity; the pre-period is not exchangeable
+   - Low bias, low variance → the model is fine; the failure is MC noise in the p-value
+3. **For low-power studies, prefer Type-S / Type-M error over Type-I.** [Gelman & Carlin,
+   2014] argue convincingly that for single-unit, short-window interventions, the relevant
+   errors are wrong sign (Type-S) and wrong magnitude (Type-M), not false positive. A
+   "statistically significant" effect in a low-power regime is likely to have both problems.
+4. **Report the multi-method ensemble as a range, not a point.** If RDiT says £160K, BSTS
+   HMC says £298K, and Prophet says £355K, your headline is "£160K–£355K with a median
+   around £290K" — not "£298K per BSTS". The dispersion is itself information.
+5. **Be explicit about which spec is doing the heavy lifting.** If the headline depends on
+   selecting the lowest-p spec from a 224-spec grid, call that out. "Best spec in a
+   pre-registered grid" is defensible; "best spec we could find" is not.
+
+### Language that won't survive contact with a client stats reviewer
+
+Client-facing deliverables should avoid terms that suggest more precision than the methods
+can deliver. Quick swap list:
+
+| Don't say | Do say |
+|---|---|
+| "Model p-value of 0.005" | "Posterior probability of a positive effect: 99.5%" — or explicitly "Bayesian posterior predictive p-value" |
+| "The effect is statistically significant (p < 0.05)" | "The posterior concentrates 99.5% of its mass on a positive effect" — or if you really want a p-value word, "one-sided Bayesian tail probability of 0.005" |
+| "Passes permutation" | "Passes date-shuffled randomization at the 0.10 threshold" (+ state whether training length was matched) |
+| "Spec curve analysis validates the effect" | "Specification grid robustness sweep (not a full Simonsohn 2020 SCA — joint inference not yet implemented)" |
+| "48 of 50 placebos below the real" | "Rolling placebo empirical p-value ≈ 0.04" (give both; clients understand p-values) |
+| "The canonical spec is permutation-fragile" | "The canonical spec fails the date-shuffled randomization test; the multi-method ensemble is the stronger summary" |
+| "Lead with the best spec" | "We report a multi-method ensemble because a single point estimate understates uncertainty" |
+
+### When in doubt: the multi-method ensemble is the honest summary
+
+The strongest defence against every failure mode in this section is the multi-method
+cross-check — RDiT + BSTS (VI + HMC) + Prophet + (optionally) CausalPy, on at least two
+pre-period variants, plus a per-method placebo calibration check. When the methods agree
+directionally and the magnitude spread is narrow, the conclusion is robust. When they
+disagree, report the disagreement rather than picking a favourite.
+
+The current skill's Step 4 already mandates dual-method analysis; extend this to **at least
+one design-based method** (RDiT) when the model-based methods (BSTS, Prophet, CausalPy)
+agree too tightly for comfort. Design-based methods fail differently from model-based methods,
+and that's exactly what you want as a cross-check.
+
 ## Reference Sections
 
 > **Full details:** See [references/benchmarks_and_methods.md](references/benchmarks_and_methods.md)
@@ -1394,3 +1600,9 @@ main skill focused on the pipeline steps. Quick pointers:
 Key citations: Brodersen et al. (2015), Scott & Varian (2014), Abadie et al. (2010, 2015, 2021),
 Eggers et al. (2024), Makowski et al. (2019), Gelman & Yao (2021), Gils et al. (2022),
 Athey & Imbens (2017), Linden (2018), Peduzzi et al. (1996), Afyouni et al. (2019).
+
+**Methodology Communication (added v2.3.0):** Gelman, Meng & Stern (1996), Robins, van der Vaart
+& Ventura (2000), Bayarri & Berger (2000), Phipson & Smyth (2010), Fisher (1935),
+Imbens & Rubin (2015), Simonsohn, Simmons & Nelson (2020), Steegen, Tuerlinckx, Gelman &
+Vanpaemel (2016), Gelman & Loken (2013), Gelman & Carlin (2014), Blei, Kucukelbir & McAuliffe
+(2017), Hyndman & Athanasopoulos (2021).
