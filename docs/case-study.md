@@ -2,18 +2,22 @@
 
 Every causal analysis follows the same pattern: a promising-but-not-significant first result, then systematic improvements that either find the real signal or confirm there isn't one. Here's what that looks like on a real engagement.
 
-## The Journey: p=0.22 to Permutation-Validated
+## The Journey: from p=0.22 to a spec-curve-validated effect
 
-| Step | p-value | Key Insight |
+| Step | Headline signal | Key Insight |
 |---|---|---|
-| Original specification | 0.223 | Correct direction, wide credible intervals |
-| Exclude high-variance pre-period | 0.163 | -27% CI width. Seasonal variance was the dominant noise source |
-| Multi-modal holiday intensity (v2) | 0.140 | 6-component Gaussian curve (r=0.828) replaces binary flag (r=0.02) |
-| Remove contaminated covariate | ~0.06 | Biggest single improvement — covariate was absorbing the treatment effect |
-| Mask winter sale periods (both years) | 0.047 | Masking Nov-Jan: CV drops from 58% to 24%, 12/12 specs positive |
-| **Permutation validation (50 shuffles)** | **perm p=0.032** | **Effect-size comparison confirms the result is unusual vs random dates** |
+| Original specification | model p=0.223 | Correct direction, wide credible intervals |
+| Exclude high-variance pre-period | model p=0.163 | -27% CI width. Seasonal variance was the dominant noise source |
+| Multi-modal holiday intensity (v2) | model p=0.140 | 6-component Gaussian curve (r=0.828) replaces binary flag (r=0.02) |
+| Remove contaminated covariate | model p≈0.06 | Biggest single improvement — covariate was absorbing the treatment effect |
+| Mask winter sale periods (Nov-Jan) | model p=0.047 | Masking Nov-Jan: CV drops from 58% to 24%, 12/12 specs positive |
+| **Fix the mask zero-injection bug (Issue #51)** | model p=**0.005** | Mask-aware index filter: CI narrows 26%, p tightens 4×. The pre-fix p=0.047 was computed on a silently corrupted pre-period (masked days reinjected as £0 revenue). See "Data-Prep Zero-Injection Trap" in SKILL.md. |
+| Rolling-placebo backtest (post-fix, HMC weekly) | **rank 0.94**, empirical p=0.06 | Clean PASS. Mask-off diagnostic confirms the rank is not mask-interaction biased (byte-identical 0.94 without the mask). |
+| Date-shuffled randomization (post-fix, full range) | p=**0.47** | Honest FAIL on the single spec — but see diagnostic + spec curve below |
+| Date-shuffled randomization (training-length-matched) | p=**0.29** | Training-window length was a first-order confounder: matching pre-period length explains ~60% of the pre-fix p gap but doesn't fully dissolve it |
+| **224-spec robustness grid** (post-fix) | **208/208 valid specs directional positive**, top 10 per mask mode £260K–£295K with model p < 0.025 | The strongest single signal: the effect survives all 208 defensible alternative specifications. Spec grid becomes the primary validation for the client headline. |
 
-**Important:** The model-based p=0.047 alone was not sufficient. Multi-method placebo testing revealed ALL methods (BSTS VI, HMC, Prophet, RDiT) show 35-55% false positive rates on this dataset. The permutation test (which compares effect sizes, not model p-values) provided the honest validation.
+**Important:** The model p=0.005 alone is not sufficient — tfcausalimpact's posterior predictive p-value is a Bayesian model-criticism diagnostic, not a frequentist Type-I rate. Multi-method placebo testing on this dataset shows ALL model-based methods (BSTS VI, HMC, Prophet, RDiT) have 35-55% FPR on naive pre-periods. The honest validation comes from **three complementary signals**: (a) 224-spec grid robustness, (b) rolling-placebo backtest rank 0.94, (c) date-shuffled randomization test with training-length-matched diagnostic at p=0.29. When the three disagree, the grid carries primary inferential load — it doesn't share single-spec failure modes.
 
 ## The Meta-Lesson: Subtract Before You Add
 
@@ -31,19 +35,24 @@ Three of five improvement steps were subtractions.
 
 ## The Specification Search Caveat
 
-If you test N specifications and report the one with the lowest p-value, the result is exploratory, not confirmatory. In this engagement, 48 experiments were conducted. The best single-spec p=0.039 was an outlier — all 6 sensitivity specs had p=0.18-0.24.
+If you test N specifications and report only the one with the lowest p-value, the result is exploratory, not confirmatory. This engagement ran two distinct types of specification search, and they answer different questions:
 
-The honest framing: "The primary specification produces p=0.21. An optimised specification achieves p=0.039, but this should be treated as exploratory." Lead with the Bayesian posterior probability across ALL specs, not the cherry-picked p-value.
+- **Single-spec optimisation (exploratory)**. Early in the engagement, 48 ad-hoc specifications were tried to reach a defensible canonical. The "best single-spec p=0.039" was an outlier — sensitivity specs clustered at p=0.18–0.24. This path is pure exploration; lead with the Bayesian posterior probability across ALL specs tried, not the cherry-picked p-value.
+- **Pre-registered 224-spec grid (confirmatory)**. A defensible grid of 224 mask-mode specifications (55 covariate bundles × 4 mask modes × 2 seasonalities, restricted to the mask-mode subset) was run *after* the canonical was fixed. The grid's primary claim is about **robustness**, not about the lowest p-value: 208/208 valid specs directional positive, top 10 per mask mode £260K–£295K with model p < 0.025. The 16 degenerate log-target specs on short masked pre-periods (effect collapses to ~£1) were filtered before aggregation — see the "Common implementation gotchas for the placebo rank" section in SKILL.md.
+
+The honest framing for the client: **"The +£280K effect is primarily supported by its robustness across 224 alternative specifications; the rolling-placebo backtest is a clean supporting signal; the date-shuffled randomization test at p=0.29 (training-length-matched) is an honest limitation that the spec curve robustness check partly answers."** No single spec carries the headline — the grid does.
 
 ## Key Lessons Encoded in the Skill
 
 **Strategic** (apply to any causal analysis):
 - Subtract before you add — removing contaminated covariates and high-variance pre-periods beats adding more features
-- Mask, don't truncate — masking high-variance windows preserves the annual cycle while removing noise
+- Mask, don't truncate — masking high-variance windows preserves the annual cycle while removing noise (but verify the mask actually reached the model input — see "Data-Prep Zero-Injection Trap" in SKILL.md)
 - Contaminated covariates silently absorb causal effects — always run a safety audit
 - Two methods > one — cross-method agreement is stronger evidence than any single p-value
 - Honest uncertainty builds client trust — never claim statistical significance you don't have
-- Run many specs, report all of them — direction consistency across 12/12 specs is stronger than 1/1 significant
+- Run many specs, report all of them — direction consistency across 208/208 valid specs is stronger than 1/1 significant
+- **Lead with spec curve robustness when single tests disagree** — when model-p passes but placebo/randomization tests conflict, the grid is the strongest single signal because it doesn't share single-spec failure modes
+- **Diagnose, don't demote** — when a placebo test fails, run the cheap training-length-matched + mask-off diagnostics (~$0.10 on Cloud Run) before rewriting the client framing. Theoretical concerns need empirical tests.
 
 **Tactical** (specific techniques):
 - Binary flags can't capture magnitude — use multi-modal intensity curves for seasonal peaks
@@ -52,3 +61,5 @@ The honest framing: "The primary specification produces p=0.21. An optimised spe
 - nseasons=7 makes DoW covariates redundant, but nseasons=14 needs them
 - Continuous sale intensity > binary flag — MAD z-scores naturally weight major sales higher
 - Weather interactions encode consumer behaviour — `precip x sale_intensity` captures "friction x intent"
+- **Placebo rank must use signed comparison** (`p < real_effect`), not `abs(p) < abs(real_effect)` — the two disagree materially on near-zero-symmetric post-fix distributions (e.g. signed median £16K vs absolute median £101K on the same data)
+- **Filter degenerate log-target specs** on short masked pre-periods via `--min-abs-eff` before downstream permutation/backtest — they collapse to ~£1 and crowd out valid specs
