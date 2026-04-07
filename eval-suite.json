@@ -1,8 +1,8 @@
 {
   "skill_name": "causal-impact-campaign",
-  "version": "2.0.0",
+  "version": "2.3.0",
   "created_by": "research-backed-eval",
-  "notes": "v2.1.0: 34 assertion tests grounded in 25+ academic papers, 41 trigger tests. v2.0.0 had 22 assertions; v2.1.0 adds 12 gap-filling assertions from deep research (structural breaks, residual autocorrelation, pre-trend sensitivity, regression to mean, MDE, anticipation effects, log retransformation, SCA joint inference, model selection discipline, time-varying effects, SUTVA). See references/eval_research_notes.md.",
+  "notes": "v2.3.0: metadata bumped to track the skill version. v2.2.0 added the Data-Prep Zero-Injection Trap section; v2.3.0 added the Methodology Communication section (verified tfcausalimpact p-value formula, identification assumptions block, three-tests framing, diagnose-don't-demote protocol with worked example and placebo-rank implementation gotchas). Assertion count unchanged at 34. Candidates for future assertions covering methodology communication topics (tfcausalimpact p-value formula, signed-vs-abs placebo rank, training-length-matched and mask-off diagnostic protocols) are tracked but not yet implemented. v2.1.0: 34 assertion tests grounded in 25+ academic papers, 41 trigger tests. v2.0.0 had 22 assertions; v2.1.0 added 12 gap-filling assertions from deep research (structural breaks, residual autocorrelation, pre-trend sensitivity, regression to mean, MDE, anticipation effects, log retransformation, SCA joint inference, model selection discipline, time-varying effects, SUTVA). See references/eval_research_notes.md.",
   "assertions": [
     {
       "id": "assert-perm-effect-size",
