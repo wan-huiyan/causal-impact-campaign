@@ -112,7 +112,9 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 
 4. **Honest reporting framework.** Converts p-values to "probability of positive effect" for non-technical stakeholders. Distinguishes confirmatory (pre-registered) from exploratory (post-hoc) results. Never claims significance you don't have.
 
-5. **34 research-backed eval assertions.** The eval suite tests methodology correctness against 25+ academic papers (Abadie 2010, Brodersen 2015, Eggers 2024, Young 2019, Roth 2022, and more).
+5. **Methodology communication guide (v2.3.0).** A dedicated skill section for writing methodology notes that survive client stats review. Covers the verified `tfcausalimpact` p-value formula (two-sided, `N+1` denominator — NOT what most write-ups claim), an explicit identification assumptions block, "three tests, three different questions" framing, a "diagnose, don't demote" protocol with two cheap Cloud Run diagnostics (training-length-matched permutation + mask-off rolling placebo), a worked example with real numbers, placebo-rank implementation gotchas (signed-vs-abs, degenerate log-target filter), and a client-language swap table.
+
+6. **34 research-backed eval assertions.** The eval suite tests methodology correctness against 25+ academic papers (Abadie 2010, Brodersen 2015, Eggers 2024, Young 2019, Roth 2022, and more).
 
 ## Companion Skills
 
@@ -128,6 +130,7 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 
 | Version | Date | Changes |
 |---------|------|---------|
+| **2.3.0** | 2026-04-07 | New H2 section: "Methodology Communication — Explaining Your Tests Honestly". Six subsections: (1) the verified `tfcausalimpact` p-value formula (two-sided, `N+1` denominator, counts `sim_sum` vs `obs_sum` — not `(1/N) × #{effect ≤ 0}` as most write-ups claim), sourced directly from `causalimpact/inferences.py:compute_p_value`; (2) explicit 6-item identification assumptions block (sharp intervention, SUTVA in time, covariate exogeneity, regime stationarity, mask non-informativeness, randomization exchangeability); (3) "three tests, three different questions" framing table (model p / rolling placebo / date-shuffled randomization / specification grid, each with the validity assumption it hinges on); (4) "diagnose, don't demote" protocol with two cheap Cloud Run diagnostics (training-length-matched permutation + mask-off rolling placebo) and a worked example with real numbers from the Schuh post-Issue-#51 canonical; (5) common implementation gotchas for the placebo rank (signed-vs-abs comparison bug, `--min-abs-eff` filter for degenerate log-target specs on short masked pre-periods); (6) "lead with spec curve robustness when single tests disagree" framing with a drop-in client-facing template. Also adds 12 new bibliography citations across 5 new sections (posterior predictive p-values, randomization inference, spec curve & multiverse analysis, Bayesian inference theory & Type S/M errors, forecasting CV). |
 | **2.2.0** | 2026-04-07 | New section: "Data-Prep Zero-Injection Trap" — latent bug class where `mask` + `prep_df` silently fills masked days with `y=0` + interpolated covariates instead of removing them. Affects all methods except RDiT (which uses a local bandwidth window). Includes reproduction recipe, verification pattern, and 4 fix options. Discovered via the Schuh retail engagement (Issue #51). Pitfall #13 added. Prior "masking passes permutation" guidance corrected. FPR section updated with caveat. |
 | **2.1.0** | 2026-04-02 | 34 research-backed eval assertions, trigger keywords for merged content |
 | **2.0.0** | 2026-04-02 | Merged permutation-validation + bsts-placebo-calibration, reference files architecture, data-provenance-verifier companion |
