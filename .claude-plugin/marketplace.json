@@ -1,5 +1,7 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "wan-huiyan-causal-impact-campaign",
+  "description": "Single-plugin marketplace for causal-impact-campaign — a Claude Code skill for measuring the causal impact of marketing campaigns, promos, and interventions using Bayesian structural time series.",
   "owner": {
     "name": "Huiyan Wan"
   },

@@ -121,8 +121,12 @@ describe("Manifest consistency", () => {
         assert.ok(plugin.source, "plugin must have source");
       });
 
-      it("name matches plugin.json", () => {
-        assert.equal(files.marketplaceJson.name, SKILL_NAME);
+      it("first plugin entry name matches plugin.json", () => {
+        // The marketplace's own `name` can be anything (e.g. owner-prefixed
+        // "wan-huiyan-causal-impact-campaign"). The real invariant is that the
+        // first plugin entry must match the plugin.json name, because that's
+        // what users type in `claude plugin install <plugin-name>@<marketplace>`.
+        assert.equal(files.marketplaceJson.plugins[0].name, SKILL_NAME);
       });
 
       if (files.marketplaceJson.plugins[0]?.version) {
