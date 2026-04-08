@@ -1,6 +1,6 @@
 ---
 name: causal-impact-campaign
-version: "2.3.0"
+version: "2.4.0"
 description: |
   Measure the causal impact of a marketing campaign, promo, or intervention on a business metric
   (revenue, conversions, transactions) using Bayesian structural time series. Use this skill whenever
@@ -37,7 +37,7 @@ error_handling: |
   - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
   - If methods disagree on direction, report both results honestly with interpretation guidance
   - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
-  - If CausalPy fails with xarray "Dimension(s) 'draw', 'chain' do not exist" on short treatment windows (<7 days), skip CausalPy and use RDiT as lead method. CausalPy ITS requires more post-period data.
+  - If CausalPy 0.4+ raises "Dimension(s) 'draw', 'chain' do not exist" or "unsupported operand type(s) for -: 'float' and 'InferenceDataValuesView'", or returns a wildly wrong point estimate (wrong sign, magnitude off by 10x or more), the wrapper needs a v0.4+ fix — see Step 4 → Method 2 → "CausalPy v0.4+ wrapper debugging — three compounded failure modes" for the InferenceData API fix, the prior-scale standardisation fix, the post-window bound fix, and the sklearn OLS cross-check pattern. Don't fall back to RDiT before checking — the prior-scale bug is silent and can pass naive "did it run?" tests while still producing wrong-sign numbers.
 idempotency: |
   Re-running the analysis with the same data and parameters produces the same estimates
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
@@ -299,6 +299,25 @@ for col in COVARIATES:
 Drop covariates that are constant in the pre-period, have >50% missing, or that receive
 a `SKIP` recommendation. Test `CAUTION` covariates by running the model with and without them.
 
+> **Correlation on binary covariates: Pearson is point-biserial.** When a reviewer asks
+> *"shouldn't you use point-biserial correlation for binary covariates (payday, weekend, holiday flags)
+> instead of Pearson?"*, the correct answer is: **Pearson correlation applied to a 0/1-coded binary
+> variable IS mathematically identical to point-biserial correlation** — the point-biserial formula
+> is just Pearson's formula applied to a continuous-dichotomous variable pair, and the numerical
+> values are the same. So `df.corr()` (which uses Pearson) already produces point-biserial values
+> for the binary columns; the column header just doesn't say so.
+>
+> The correct response is a column-header relabel ("correlation (Pearson / point-biserial for
+> binary covariates)"), not a recomputation. Reference:
+> [Wikipedia](https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient) — *"if we have
+> one continuously measured variable X and a dichotomous variable Y, rXY = rpb"*.
+>
+> **Caveat:** *biserial* correlation (no "point") is a different statistic that assumes the binary
+> variable is an artificial dichotomization of a latent continuous variable (e.g. "passed exam"
+> derived from a continuous test score). That one really IS different from Pearson and should be
+> used when the binary is a thresholded continuous. The reviewer concern is usually about
+> *point-biserial* (no thresholding implied), in which case Pearson on 0/1 is correct.
+
 ## Step 4: Run Multi-Method Analysis
 
 No single method is perfect for causal inference from observational time series. Each makes
@@ -310,7 +329,7 @@ whether they agree is far more convincing than any single p-value.
 | Method | What it does | When to use | Key limitation |
 |---|---|---|---|
 | **BSTS (tfcausalimpact)** | Decomposes time series into trend + seasonality + regression, projects counterfactual | Always — the primary analysis. Full decomposition with covariates | Struggles with short campaigns (<7 days) — daily variance overwhelms signal |
-| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine. **Caution:** Earlier versions parsed a regression coefficient from CausalPy's summary table, which picked the wrong parameter and produced a large negative outlier. **Fixed:** now uses posterior predictions (observed − counterfactual). Always cross-check with BSTS and RDiT. | No time series structure (no trend/seasonal components) |
+| **CausalPy (LinearRegression)** | Bayesian regression with exact MCMC inference (NUTS) | Always — robustness check with different inference engine. **Caution for business-scale data** (revenue/spend/sessions in thousands+): the default `LinearRegression` priors are O(10⁴) too narrow and can silently produce wrong-sign, wrong-magnitude estimates with hundreds of NUTS divergences. **Fix:** standardise the data inside the wrapper using pre-period stats, OR cross-check with sklearn OLS on the same formula — see "CausalPy v0.4+ wrapper debugging — three compounded failure modes" subsection below for the full procedure. Always cross-check with BSTS and RDiT. | No time series structure (no trend/seasonal components) |
 | **RDiT** | Local linear regression at the intervention boundary, bootstrap CIs | **Especially for short campaigns.** Only method that achieved significance for 4-day promo | Ignores data far from cutoff; sensitive to bandwidth; no decomposition |
 | **Conformal CIs** | Distribution-free prediction intervals from pre-period residual quantiles | Always — sanity check on Bayesian CIs. If 2x wider → model overconfident; if 2x narrower → model over-conservative | Can't compute probability of effect; sensitive to pre-period outliers |
 
@@ -449,6 +468,209 @@ sites/regions), not for single-unit ITS.
 
 **ScikitLearnAdaptor note:** The API changed in CausalPy 0.8 — `ScikitLearnAdaptor()` takes
 no arguments. Check the current docs if you need sklearn models.
+
+### CausalPy v0.4+ wrapper debugging — three compounded failure modes
+
+CausalPy underwent a major refactor in v0.4.0 ("unify quasi experiment classes", Aug 2024) and again in v0.7.0 (`effect_summary` reorganisation, Jan 2026). Wrappers written against earlier versions will now fail in three independent ways that **compound each other** — fixing the most visible error does not necessarily get you a correct answer. You can easily ship a "working" wrapper that silently returns the wrong sign and two orders of magnitude too large a magnitude, because the errors hide each other.
+
+Use this checklist when (a) upgrading CausalPy from pre-0.4 to 0.4+/0.8+, (b) the wrapper raises `TypeError: unsupported operand type(s) for -: 'float' and 'InferenceDataValuesView'` or `ValueError: Dimension(s) 'draw', 'chain' do not exist`, (c) the Bayesian point estimate is far from sklearn OLS on the same data, (d) NUTS reports >50 divergences, or (e) the point estimate has the wrong sign vs the other methods in the cross-method ensemble.
+
+#### Step 1 — always cross-check against sklearn OLS first
+
+Before debugging the Bayesian path, run sklearn OLS through the same CausalPy wrapper. It is fast (no MCMC) and gives a reference point estimate:
+
+```python
+from sklearn.linear_model import LinearRegression as SklearnLR
+import causalpy as cp
+
+result_ols = cp.InterruptedTimeSeries(
+    df,                              # same data
+    treatment_time=treatment_time,   # same treatment time
+    formula=formula,                 # same formula
+    model=SklearnLR(),               # sklearn OLS, not pymc_models.LinearRegression
+)
+# With sklearn, result.post_pred is a plain numpy array — no unwrapping needed
+cf_ols = result_ols.post_pred.flatten()
+print(f"sklearn OLS effect: {(post_actual.sum() - cf_ols.sum()):,.0f}")
+```
+
+Use this as the anchor. If the Bayesian fit diverges from sklearn OLS by more than ~5%, the Bayesian fit is broken — usually prior scale (Step 3), occasionally model mis-specification.
+
+#### Step 2 — fix the v0.4+ API path (`InferenceData` wrapping + new `treated_units` dim)
+
+`result.post_pred` is no longer a raw `xarray.DataArray`. In CausalPy 0.4+ it is an `arviz.InferenceData` object with a new `treated_units` dimension. The variable name inside `posterior_predictive` is `y_hat` regardless of the `y_col` name in the formula.
+
+```python
+# Pre-0.4 (broken on v0.4+):
+# post_pred = result.post_pred          # was xarray.DataArray
+# cf_mean = post_pred.mean(dim=["chain","draw"])
+
+# CausalPy 0.4+ correct access:
+pp_id = result.post_pred                                 # now InferenceData
+assert hasattr(pp_id, "posterior_predictive"), \
+    "Expected arviz.InferenceData — check causalpy version"
+post_da = pp_id.posterior_predictive["y_hat"]            # xarray.DataArray
+if "treated_units" in post_da.dims:                      # new multi-unit dim
+    post_da = post_da.squeeze("treated_units", drop=True)
+
+# Now the old semantics work:
+cf_mean = post_da.mean(dim=["chain", "draw"]).values.flatten()
+per_sample_cum = post_da.sum(dim="obs_ind").values.flatten()  # shape (chain*draw,)
+```
+
+For `InterruptedTimeSeries` on a single treated unit, the `treated_units` dim always has size 1 and can be safely squeezed. For multi-unit `SyntheticControl` workflows, do not squeeze — iterate over `treated_units` instead.
+
+#### Step 3 — fix the silent prior-scale bug with pre-period standardisation
+
+**This is the hardest bug to find and the most generally important one.** CausalPy's `cp.pymc_models.LinearRegression.default_priors`:
+
+```python
+default_priors = {
+    "beta":  Prior("Normal",     mu=0, sigma=50, dims=["treated_units", "coeffs"]),
+    "y_hat": Prior("Normal", sigma=Prior("HalfNormal", sigma=1, ...), ...),
+}
+```
+
+These priors are calibrated for **O(1) data** (CausalPy's bundled test datasets where `y` is on a 20–80 scale). On **business-scale data** like revenue (£200K–£600K/day), session counts, ad spend, etc., they are **O(10⁴) too narrow**. Symptoms: hundreds of NUTS divergences, rhat warnings, and a biased point estimate — often **wrong sign** and off by orders of magnitude. The Bayesian fit runs to completion, so a naive "did it crash?" test passes.
+
+**Do NOT try to tune custom priors by hand** — the scales are data-dependent and fragile. **Standardise the data instead**, so the default priors always work regardless of scale:
+
+```python
+import numpy as np
+import pandas as pd
+
+# z-score standardise using PRE-PERIOD stats only (so post is out-of-sample)
+pre_mask = df.index < treatment_time
+if not pre_mask.any():
+    raise RuntimeError("No pre-period rows available for fit.")
+
+df_scaled = df.copy()
+scale = {}
+for col in [y_col, "t", *feature_cols]:                  # every column in the formula
+    mu = float(df_scaled.loc[pre_mask, col].mean())
+    sd = float(df_scaled.loc[pre_mask, col].std()) or 1.0  # avoid div-by-zero
+    scale[col] = (mu, sd)
+    df_scaled[col] = (df_scaled[col] - mu) / sd
+y_mean, y_std = scale[y_col]
+
+# Fit on standardised data — default priors now work
+result = cp.InterruptedTimeSeries(
+    df_scaled,
+    treatment_time=treatment_time,
+    formula=formula,
+    model=cp.pymc_models.LinearRegression(
+        sample_kwargs={
+            "random_seed": 42,
+            "chains": 2,
+            "draws": 400,
+            "tune": 400,
+            "cores": 1,                 # macOS multiprocessing fork issue
+            "target_accept": 0.95,      # extra margin against divergences
+            "progressbar": False,
+        },
+    ),
+)
+
+# Un-standardise the posterior predictive back to original units
+post_da = result.post_pred.posterior_predictive["y_hat"].squeeze("treated_units", drop=True)
+cf_mean_scaled = post_da.mean(dim=["chain","draw"]).values.flatten()
+cf_mean = cf_mean_scaled * y_std + y_mean
+
+# CI: un-standardise the per-sample sum.
+# sum(y_scaled) = sum((y - μ)/σ) = (sum(y) - n*μ)/σ
+# therefore sum(y_scaled) * σ + n*μ = sum(y)
+per_sample_cum_scaled = post_da.sum(dim="obs_ind").values.flatten()
+n_post = cf_mean.shape[0]
+per_sample_cum = per_sample_cum_scaled * y_std + n_post * y_mean
+
+# Effect = observed cumulative − counterfactual cumulative
+post_actual_raw = df_raw.loc[df_raw.index >= treatment_time, y_col].values.astype(float)
+abs_eff = float((post_actual_raw[:n_post] - cf_mean).sum())
+ci_samples = float(post_actual_raw[:n_post].sum()) - per_sample_cum
+abs_low, abs_up = float(np.percentile(ci_samples, 2.5)), float(np.percentile(ci_samples, 97.5))
+```
+
+After this fix:
+- Divergences should drop from hundreds to 0–5
+- `abs_eff` should match sklearn OLS to within a few percent
+- CI width should be sensible relative to the point estimate
+- rhat and ESS warnings should disappear
+
+**Why standardisation is the right fix (vs hand-tuning priors)**: hand-tuning priors to your data scale is fragile — you have to re-tune for every new dataset. Standardisation is scale-invariant: the same priors work on £K, £M, session counts, click-through rates, etc. It's also the standard practice in Bayesian regression pedagogy (Gelman BDA3 Ch. 14) for exactly this reason.
+
+**Common slip in the un-standardisation math**: forgetting the `+ n * y_mean` term in the per-sample sum. If you forget it, the CI will be centred near zero instead of near the point estimate, and the `abs_low < abs_eff < abs_up` invariant will fail. Add an assertion: `assert abs_low < abs_eff < abs_up, "CI un-standardisation is wrong"`.
+
+#### Step 4 — add a `post_e` bound to your wrapper
+
+If your wrapper takes only `post_s`, it silently treats every row after `post_s` as the post-period. Add an optional `post_e` kwarg and trim:
+
+```python
+def run_causalpy_wrapper(
+    d, y_col, x_cols, post_s,
+    post_e: str | None = None,       # new, optional — backwards compatible
+    **kwargs,
+):
+    df = d.copy()
+    if post_e is not None:
+        df = df.loc[df.index <= pd.Timestamp(post_e)]
+    # ... rest of wrapper
+```
+
+Update callers that have an explicit `post = [s, e]` window to pass `post_e=post[1]`.
+
+#### Verification — check ALL of these simultaneously
+
+After applying the three fixes above, you must verify against **all** of these — fixing one without the others can leave silent bugs:
+
+1. **Sanity test against sklearn OLS on the same data**: Bayesian `abs_eff` should match sklearn OLS to within ~5%. If not, something is still wrong with the model spec or priors.
+2. **Sanity test against CausalPy's bundled ITS test data**: `cp.load_data("its")` with `formula = "y ~ 1 + t + C(month)"` has a known +5/month treatment effect. Your wrapper should recover a positive direction with a sensible magnitude.
+3. **NUTS diagnostics**: 0–5 divergences, no rhat > 1.01 warnings, no ESS < 400 warnings. Divergences in the hundreds mean the prior scale is still wrong (or you forgot to standardise).
+4. **CI brackets the point estimate**: `abs_low < abs_eff < abs_up`. If not, your un-standardisation math is wrong (see common slip above).
+5. **Direction agrees with other methods in the ensemble**: CausalPy should fall somewhere within the range of BSTS, Prophet, RDiT, Conformal. A CausalPy result outside the range of the other methods is a red flag.
+
+#### Worked example: real UK retail revenue post-fix (verified 2026-04-08, CausalPy 0.8.0 / PyMC 5.28.4)
+
+Running the fixed wrapper on a UK retail revenue dataset (684 pre-period rows after Nov–Jan mask, 24 business-driver covariates, 4-day campaign):
+
+| Model | Effect | CI | Divergences |
+|---|---:|---|---:|
+| CausalPy LR, default priors, **no standardisation** | **−£3,207,520** (wrong sign, wrong magnitude) | [−£3.30M, −£3.12M] (suspiciously tight) | **~260** |
+| sklearn OLS (reference) | +£281,467 | — | n/a |
+| **CausalPy LR, default priors + pre-period standardisation** | **+£270,721** | [+£17,381, +£535,013] | **0** |
+| BSTS HMC weekly (cross-method reference) | +£298,409 | [+£57K, +£540K] | n/a |
+| Prophet | +£354,804 | [+£143K, +£571K] | n/a |
+| RDiT local linear | +£160,108 | [+£42K, +£272K] | n/a |
+
+The unstandardised Bayesian fit was wrong by £3.5M and had the wrong sign. Standardisation alone — without changing priors, formula, or `sample_kwargs` other than `target_accept=0.95` — fixed it. The fixed Bayesian result matches sklearn OLS to within ~£2K and sits comfortably in the middle of the cross-method ensemble.
+
+#### Notes on edge cases
+
+- **`y_hat` vs `mu` in `posterior_predictive`**: the `posterior_predictive` group contains both `y_hat` (predictive samples including sigma noise) and `mu` (deterministic linear predictor mean). For a CausalImpact-style effect calculation, **use `y_hat`** — the predictive noise is part of the counterfactual uncertainty. Using `mu` would under-estimate the CI.
+- **Older "Dimension(s) 'draw', 'chain' do not exist on short treatment windows" advice was misdiagnosed**: earlier versions of this skill recommended skipping CausalPy on short windows. The actual cause is the v0.4+ `InferenceData` wrapping (Step 2), not window length. Apply the Step 2 fix instead of skipping.
+- **Earlier "regression coefficient parsed wrong" caveat is now superseded**: prior versions of this skill warned that "earlier wrapper versions parsed a regression coefficient from CausalPy's summary table, which picked the wrong parameter and produced a large negative outlier." That bug class is replaced by the current three (InferenceData wrapping, prior-scale mismatch, post-window bound). The fix path is Steps 1–4 above, not the older "use posterior predictions" patch.
+- **Version coverage**: verified on CausalPy 0.8.0 / PyMC 5.28.4 / arviz 0.23.4 / Python 3.11. The `InferenceData` wrapping first appeared in v0.4.0; the `treated_units` dim first appeared in v0.4.0 as well. The `sigma=50` `beta` prior has been in `LinearRegression.default_priors` since v0.4.0 and is still there in v0.8.0.
+
+### Decomposition path silently uses VI even when the headline uses HMC
+
+A subtle but important gotcha for any pipeline that runs decomposition (per-channel splits, conversion-rate breakdown, AOV breakdown) on top of a BSTS analysis: **the decomposition code path almost certainly defaults to BSTS Variational Inference, even if the headline used HMC**. This happens because the decomposition wrapper typically calls `run_ci(...)` (or equivalent) without explicitly passing `fit_method`, and `tfcausalimpact`'s default is `vi`.
+
+Symptoms:
+- Headline number is from HMC (deterministic, well-calibrated)
+- Per-channel decomposition numbers are from VI (stochastic, no fixed random seed)
+- Re-running the decomposition gives slightly different per-channel splits even on identical data
+- Per-channel CIs are wider than the headline CI (because VI under-estimates posterior variance)
+- Channel split percentages don't add up cleanly to the headline (because they're from a different fit)
+
+**Why it matters for client deliverables:** if you cite "headline £298K" and "paid +29%, organic +35%" in the same client doc, you are implicitly claiming both numbers come from the same model. They don't. Re-running the decomposition next week could give "paid +73% / organic +30%" instead — same data, same code, different VI draws. Publishing per-channel VI percentages as headline-level claims is a credibility risk.
+
+**Fix options:**
+1. **Modify the decomposition path** to accept and pass through a `fit_method` override, then run decomposition with `fit_method="hmc"` to match the headline. Slow but deterministic.
+2. **Run decomposition multiple times** (5+ runs) and report the median + range of per-channel splits. Quantifies the VI stochasticity.
+3. **Don't publish per-channel splits as point estimates.** Disclose the directional pattern ("conversion-driven, minimal AOV impact") and explicitly note that the absolute percentages are not stable enough to publish as headline numbers because the decomposition uses BSTS VI rather than HMC.
+
+Option 3 is the safest default for client-facing reports. Options 1 and 2 are appropriate if a per-channel headline is genuinely necessary and you have time to run them.
+
+This gotcha is independent of the "VI Stochasticity Warning" section above (which covers the general VI-vs-HMC trade-off). The decomposition-specific issue is that the default code path silently uses VI even when the user has explicitly chosen HMC for the headline.
 
 ### Sensitivity analysis
 
@@ -775,6 +997,38 @@ Key extensions after the primary analysis:
 - **Tiered covariates:** Default (5 base) → Enhanced (+Trends) → Full (+sale signals), each permutation-validated
 
 ## Step 7: Document
+
+> **Quality gate before client delivery: run a multi-agent review panel.**
+> Before sending any client-facing deliverable (slide deck, report, methodology note, Google Doc
+> update), spend 30–60 minutes running a parallel multi-agent review panel as a quality gate. The
+> author is too close to the work to spot factual errors, terminology slips, and miscommunication
+> risks; specialised review agents catch what the author glosses over.
+>
+> **Recommended panel composition** (launch in a single message with multiple `Agent` tool calls,
+> in parallel):
+>
+> | Agent | Slice | What it catches |
+> |---|---|---|
+> | `data-scientist` | Methodology + narrative consistency in deliverables | Factual errors, missing caveats, statistical mistakes (e.g. CI claim that contradicts the actual CI) |
+> | `data-analyst` | Number tracing — every numerical claim verified against the canonical source (BQ row, JSON file) | Stale numbers, off-by-one errors, fingerprint mismatches |
+> | `compliance-auditor` | Data provenance + client trust + audit-trail integrity | Anything that would damage client trust |
+> | `lit-researcher` | Methodology framing vs cited literature | Misattributed methods, missing references, citation errors |
+>
+> **Critical rule:** before launching any agent, write a `docs/reviews/scoping.md` containing
+> (a) project background, (b) file scope per agent, (c) **canonical numbers table** that the
+> data-analyst agent can verify against, (d) severity rubric (P0 BLOCKING / P1 IMPORTANT / P2
+> NICE-TO-HAVE), (e) out-of-scope items. Pass this scoping doc as the FIRST file each agent should
+> read. It anchors all agents on the same source of truth.
+>
+> **Real example:** in a recent UK retail engagement, the data-scientist agent caught 2 P0 BLOCKING
+> factual errors in the locked client delivery files: (a) a method row in the cross-method table
+> claiming "CI excludes zero" when the actual CI was [−£29K, +£501K] which includes zero, and
+> (b) a "decomposition table already correct" claim when the post-fix decomposition gave +33%
+> revenue vs the unchanged +55% in the live doc. Both would have shipped to the client without
+> the review panel. Cost: £0 Cloud Run (just agent token costs, ~£0.40 total). ROI: avoiding a
+> credibility-damaging delivery to the client. See the dedicated `overnight-review-client-delivery`
+> skill for the full Phase A / Phase B / Phase C structure with stale-file refresh discipline,
+> locked-file escape hatch, and parallel-agent branch hygiene.
 
 Produce a markdown findings document with this structure:
 

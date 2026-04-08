@@ -10,7 +10,7 @@
       "name": "causal-impact-campaign",
       "source": "./plugins/causal-impact-campaign",
       "description": "Causal impact measurement for marketing campaigns using Bayesian structural time series. Includes permutation validation, placebo calibration, Specification Curve Analysis, a methodology communication guide (verified tfcausalimpact p-value formula + identification assumptions + 'three tests, three different questions' framing + 'diagnose, don't demote' protocol), and 34 research-backed eval assertions.",
-      "version": "2.3.0"
+      "version": "2.4.0"
     }
   ]
 }

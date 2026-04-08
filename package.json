@@ -1,6 +1,6 @@
 {
   "name": "causal-impact-campaign",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "description": "Measure the causal impact of marketing campaigns, promos, or interventions on business metrics using Bayesian structural time series. Covers the full pipeline: data exploration, covariate engineering, 9-method analysis (BSTS VI + HMC, CausalPy, RDiT, Conformal, Prophet), 440-spec robustness grid, permutation validation, placebo calibration, methodology communication guide, and client-facing deliverables.",
   "scripts": {
