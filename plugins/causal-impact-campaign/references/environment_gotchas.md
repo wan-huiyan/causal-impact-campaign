@@ -24,14 +24,26 @@ model=cp.pymc_models.LinearRegression(
 )
 ```
 
-## CausalPy short treatment windows (< 7 days)
+## CausalPy short treatment windows (< 7 days) — MISDIAGNOSIS, NOT A REAL BUG
 
-CausalPy may fail with `Dimension(s) 'draw', 'chain' do not exist` xarray error on
-very short treatment windows (< 7 days). The ITS design requires enough post-period
-data for the Bayesian regression to produce valid posterior predictions.
+**Status:** The "Dimension(s) 'draw', 'chain' do not exist" failure was misdiagnosed
+in earlier versions of this skill. The actual cause is the v0.4+ `InferenceData`
+API change (see `SKILL.md` Step 4 → Method 2 → "CausalPy v0.4+ wrapper debugging"),
+not the treatment window length. A 4-day intervention runs cleanly with the fixed
+wrapper — empirically verified on a real client engagement (4-day promo, masked
+pre-period, 6 covariates, 0 NUTS divergences, matches sklearn OLS on the same
+formula to ~£2K on revenue of hundreds of thousands per day).
 
-**Fix:** Skip CausalPy for short campaigns and note the limitation. Use RDiT as the
-lead method for significance claims on short campaigns.
+**What to do instead:** Apply the three-bug wrapper fix in `SKILL.md` Step 4
+(InferenceData unwrap + pre-period z-score standardisation + post-window upper
+bound). With those in place, CausalPy works on short windows and returns
+estimates that match BSTS / Conformal / Prophet / sklearn OLS to within
+single-digit percent.
+
+**Note (independent):** RDiT is still the strongest *significance-test* choice for
+short campaigns (≤ 5 days) because the local-linear bandwidth narrows to roughly
+the campaign duration, making it less sensitive to far-from-cutoff seasonality.
+That's a method-selection point about statistical power, not a CausalPy bug.
 
 ## Weather data: Open-Meteo API
 

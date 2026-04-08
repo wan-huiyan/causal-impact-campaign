@@ -180,7 +180,7 @@ See [docs/case-study.md](docs/case-study.md) for the full journey from p=0.22 to
 - **Short campaigns are inherently hard.** Campaigns < 1 week have low statistical power. The skill estimates MDE upfront.
 - **All built-in methods show elevated FPR (35-55%).** The skill mitigates this with permutation testing, but practitioners should understand the limitation.
 - **numpy version conflict.** tfcausalimpact (numpy < 2) and CausalPy (numpy >= 2) must run in separate scripts.
-- **CausalPy fails on short treatment windows** (< 7 days) with xarray dimension error. Use RDiT as lead method.
+- **CausalPy v0.4+ requires the three-bug wrapper fix** (see SKILL.md Step 4 → Method 2). Earlier "fails on short treatment windows < 7 days with xarray dimension error" advice was a misdiagnosis of the same `InferenceData` v0.4+ API change — with the fix applied (InferenceData unwrap + pre-period z-score standardisation + post-window upper bound), CausalPy works fine on 4-day windows. RDiT is still the strongest *significance-test* choice for short campaigns on statistical-power grounds, but that is a method-selection point, not a CausalPy bug.
 
 </details>
 

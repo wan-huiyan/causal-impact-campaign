@@ -37,7 +37,7 @@ error_handling: |
   - If tfcausalimpact or CausalPy fails to install/run, fall back to the other method and note the limitation
   - If methods disagree on direction, report both results honestly with interpretation guidance
   - If CausalPy hangs on macOS, apply cores=1 fix in sample_kwargs
-  - If CausalPy fails with xarray "Dimension(s) 'draw', 'chain' do not exist" on short treatment windows (<7 days), skip CausalPy and use RDiT as lead method. CausalPy ITS requires more post-period data.
+  - If CausalPy fails with xarray "Dimension(s) 'draw', 'chain' do not exist", this is NOT a short-window bug — it is the v0.4+ `InferenceData` API mismatch. Apply the three-bug wrapper fix (InferenceData unwrap + pre-period z-score standardisation + post-window upper bound) — see Step 4 → Method 2 → "CausalPy v0.4+ wrapper debugging". With the fix, CausalPy works on 4-day windows. RDiT remains the strongest significance-test choice for very short campaigns on statistical-power grounds, but that is a separate method-selection point.
 idempotency: |
   Re-running the analysis with the same data and parameters produces the same estimates
   (within MCMC sampling variance). Set random_seed=42 for reproducibility.
