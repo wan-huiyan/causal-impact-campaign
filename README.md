@@ -4,7 +4,7 @@
 
 **Measure whether your campaign actually worked — not just "revenue went up."**
 
-Bayesian counterfactual analysis with multi-method validation, permutation testing, and client-ready deliverables. A [Claude Code](https://claude.com/claude-code) skill that automates the full pipeline so you get a defensible estimate instead of a naive before/after comparison.
+Bayesian counterfactual analysis with multi-method validation, empirical-null calibration, and client-ready deliverables. A [Claude Code](https://claude.com/claude-code) skill that automates the full pipeline so you get a defensible estimate instead of a naive before/after comparison.
 
 ![Demo output — causal impact analysis summary](docs/demo-output.png)
 
@@ -82,13 +82,13 @@ This skill constructs a Bayesian counterfactual, runs a safety audit on every co
 | 3. Engineer | Cyclical day-of-week, holiday intensity curves, weather, sale detection |
 | 4. Safety Audit | Flag covariates correlated with intervention — they absorb causal effect |
 | 5. Multi-Method | Run BSTS (VI + HMC), CausalPy, RDiT, Conformal CIs, Prophet |
-| 6. Validate | Permutation tests (effect-size comparison), placebo FPR calibration, rolling backtests |
+| 6. Validate | Rolling-backtest empirical-null RANK, placebo FPR calibration, spec-grid robustness (date-shuffled permutation = optional cross-check) |
 | 7. Interpret | Honest uncertainty communication with prob_positive framing |
 | 8. Deliver | Interactive HTML explorer + findings doc + spec curve chart |
 
 ## What Makes This Different
 
-1. **All methods are miscalibrated.** We tested BSTS VI, BSTS HMC, Prophet, and RDiT on placebo data — all show 35-55% false positive rates. The skill gates every result through permutation testing (effect-size comparison, not p-values) to provide honest significance.
+1. **Naive p-values are miscalibrated — so lead with the rank, not the p-value.** We tested BSTS VI, BSTS HMC, Prophet, and RDiT on placebo data — all show 35-55% *naive per-window* false-positive rates. The fix isn't to switch method; it's to lead with the miscalibration-immune reads: the rolling-backtest **empirical-null rank** and the **spec grid** (a high FPR means *distrust a single naive interval*, not *the result is unreliable*). A date-shuffled permutation test is an optional secondary cross-check.
 
 2. **Covariate safety audit catches the #1 silent failure.** A covariate that changed during the intervention absorbs your causal effect, biasing estimates toward zero. The skill tests each covariate and flags INCLUDE/CAUTION/SKIP.
 
