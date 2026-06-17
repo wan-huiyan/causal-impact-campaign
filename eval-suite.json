@@ -1,0 +1,848 @@
+{
+  "skill_name": "causal-impact-campaign",
+  "version": "2.4.0",
+  "created_by": "research-backed-eval",
+  "notes": "v2.3.0: metadata bumped to track the skill version. v2.2.0 added the Data-Prep Zero-Injection Trap section; v2.3.0 added the Methodology Communication section (verified tfcausalimpact p-value formula, identification assumptions block, three-tests framing, diagnose-don't-demote protocol with worked example and placebo-rank implementation gotchas). Assertion count unchanged at 34. Candidates for future assertions covering methodology communication topics (tfcausalimpact p-value formula, signed-vs-abs placebo rank, training-length-matched and mask-off diagnostic protocols) are tracked but not yet implemented. v2.1.0: 34 assertion tests grounded in 25+ academic papers, 41 trigger tests. v2.0.0 had 22 assertions; v2.1.0 added 12 gap-filling assertions from deep research (structural breaks, residual autocorrelation, pre-trend sensitivity, regression to mean, MDE, anticipation effects, log retransformation, SCA joint inference, model selection discipline, time-varying effects, SUTVA). See references/eval_research_notes.md.",
+  "assertions": [
+    {
+      "id": "assert-perm-effect-size",
+      "description": "Permutation test must compare effect sizes, not p-values",
+      "prompt": "I ran a permutation test for my causal impact analysis. I shuffled the intervention date 50 times and compared the model p-values from each shuffled run to my real p-value of 0.04. In 15 out of 50 runs the shuffled p-value was lower than my real p-value. What's my permutation p-value?",
+      "expected_behavior": "Must flag that comparing p-values is methodologically incorrect for permutation inference. Should recommend comparing absolute effect sizes instead. Should explain that model p-values can be inflated/miscalibrated, making p-value comparison inherit that miscalibration.",
+      "must_contain": ["effect size"],
+      "must_not_contain": ["permutation p-value is 0.30", "permutation p-value is 15/50", "your permutation p is 0.3"],
+      "category": "methodology",
+      "source": "Abadie et al. (2010, JASA) use MSPE ratio (effect-size statistic); Young (2019, QJE) shows p-value inflation under misspecification; skill ADR 0034"
+    },
+    {
+      "id": "assert-perm-plus-one",
+      "description": "Permutation p-value formula must include +1 correction",
+      "prompt": "I'm implementing a permutation test. Out of 50 random date shuffles, 2 produced effects as large as my real effect. How do I compute the permutation p-value?",
+      "expected_behavior": "Should provide the formula (n_extreme + 1) / (n_total + 1) to avoid p=0. Result should be 3/51 ≈ 0.059, not 2/50 = 0.04.",
+      "must_contain": ["\\+1", "correction"],
+      "must_not_contain": [],
+      "category": "methodology",
+      "source": "Phipson & Smyth (2010); North et al. (2002). +1 correction ensures exact uniformity under the null and avoids p=0."
+    },
+    {
+      "id": "assert-perm-exclusion-zone",
+      "description": "Permutation must exclude dates near the real intervention",
+      "prompt": "I'm generating random intervention dates for a permutation test. My real campaign ran March 1-10. Should I include February 25 or March 15 as candidate dates?",
+      "expected_behavior": "Should warn against placing pseudo-treatments too close to the real intervention (spillover, anticipation effects contaminate the null distribution). Should recommend an exclusion zone of at least 2x the campaign duration around the real treatment date.",
+      "must_contain": ["exclu"],
+      "must_not_contain": [],
+      "category": "methodology",
+      "source": "Abadie (2021, JEL): spillover from proximate dates invalidates the sharp null. Skill uses 2*post_days exclusion zone."
+    },
+    {
+      "id": "assert-fpr-threshold",
+      "description": "FPR > 10% means model is miscalibrated",
+      "prompt": "I ran a pre-period placebo test on my BSTS model. Out of 20 fake treatment windows in the pre-period, 5 showed p < 0.05. That's a 25% false positive rate. Is my model okay?",
+      "expected_behavior": "Must clearly state the model is miscalibrated. A well-calibrated model should produce FPR ≈ 5% (matching the significance threshold). FPR of 25% means the model's p-values are inflated ~5x. Should recommend NOT using this model's p-values for significance claims.",
+      "must_contain": ["miscalibrat", "not"],
+      "must_not_contain": ["looks good", "acceptable", "fine"],
+      "category": "validation",
+      "source": "Eggers et al. (2024, AJPS): FPR = 5% defines well-calibrated; skill empirical finding: 35-55% FPR across ALL tested methods on daily retail"
+    },
+    {
+      "id": "assert-fpr-all-methods",
+      "description": "FPR inflation is model-class-independent, not specific to BSTS VI",
+      "prompt": "My BSTS model using variational inference has a 40% false positive rate. Would switching to HMC (NUTS sampler) fix this?",
+      "expected_behavior": "Should explain that FPR inflation is NOT specific to VI. HMC, Prophet, and RDiT all show similar miscalibration (35-55% FPR on daily retail). The root cause is strong autocorrelation + complex seasonal patterns, not the inference method. Should recommend permutation tests as the solution.",
+      "must_contain": ["not"],
+      "must_not_contain": ["switching to HMC will fix", "HMC solves"],
+      "category": "validation",
+      "source": "Skill empirical finding (session 33): BSTS VI 41%, BSTS HMC 47%, Prophet 55%, RDiT 51%. Gils et al. (2022) FDR inflation mechanism."
+    },
+    {
+      "id": "assert-pre-period-minimum",
+      "description": "Short pre-periods with many covariates cause overfit",
+      "prompt": "I have 50 days of pre-period data and I'm using 8 covariates in my BSTS model. The model gives p=0.001. Can I trust this?",
+      "expected_behavior": "Should warn about overfitting: 50 days with 8 covariates gives EPV (events per variable) well below 10. With nseasons=14, effective parameters ~22, EPV ≈ 2.3. Autocorrelation further reduces effective sample size. Should recommend a placebo test to verify calibration, and suggest reducing covariates or extending pre-period.",
+      "must_contain": ["overfit", "placebo"],
+      "must_not_contain": ["yes you can trust", "looks significant"],
+      "category": "validation",
+      "source": "Peduzzi et al. (1996) EPV < 10 threshold; Afyouni et al. (2019) N_eff formula; Gils et al. (2022) BSTS FDR inflation"
+    },
+    {
+      "id": "assert-covariate-contamination",
+      "description": "Covariates affected by the intervention must be flagged",
+      "prompt": "I'm measuring the causal impact of a paid search campaign on revenue. I want to include paid_sessions as a covariate to improve the model's predictive power. Good idea?",
+      "expected_behavior": "Must warn that paid_sessions is likely contaminated — the paid search campaign directly drives paid sessions. Including it absorbs the treatment effect and biases the estimate toward zero. Should recommend organic_sessions as a safe alternative.",
+      "must_contain": ["contaminat", "absorb"],
+      "must_not_contain": ["good idea", "yes include it"],
+      "category": "covariates",
+      "source": "Scott & Varian (2014): covariates must be 'predictive, not causal' — unaffected by treatment. Pearl (2009): post-treatment variables are 'bad controls'."
+    },
+    {
+      "id": "assert-covariate-sensitivity-test",
+      "description": "Must test with and without suspect covariates",
+      "prompt": "I included paid_sessions in my model because it has r=0.89 correlation with revenue. When I remove it, the effect estimate jumps by 35%. What does this mean?",
+      "expected_behavior": "Should explain that a 35% increase when removing a covariate strongly suggests it was absorbing the causal signal. The covariate is likely contaminated by the intervention. Should recommend excluding it and reporting the result without it.",
+      "must_contain": ["absorb", "contaminat"],
+      "must_not_contain": [],
+      "category": "covariates",
+      "source": "Skill covariate safety rule: >20% effect change when removing a covariate indicates signal absorption. Pearl (2009) collider/mediator bias."
+    },
+    {
+      "id": "assert-brand-search-endogenous",
+      "description": "Google Trends brand search is endogenous, not safe as covariate",
+      "prompt": "I want to add Google Trends data for our brand name as a covariate in the BSTS model. Brand search correlates r=0.65 with revenue. Should I include it?",
+      "expected_behavior": "Must warn that brand search is endogenous — the campaign drives search interest. Including it absorbs treatment effect. Should recommend category-level search terms instead (e.g., 'shoes' for a shoe retailer), which are exogenous.",
+      "must_contain": ["endogenous"],
+      "must_not_contain": ["yes", "good covariate"],
+      "category": "covariates",
+      "source": "Skill lesson: brand search worsened p by ~3x and dropped effect by ~30%. Category search (near-zero revenue correlation) was the BEST covariate."
+    },
+    {
+      "id": "assert-prob-positive-framing",
+      "description": "prob_positive must be framed correctly for non-technical audiences",
+      "prompt": "My BSTS model gives p=0.08. How should I present this to the marketing team who don't understand p-values?",
+      "expected_behavior": "Should recommend converting to probability of direction: 'There is approximately a 92% probability the campaign had a positive effect.' Should cite this as the Bayesian 'Probability of Direction' (pd). Should note this resonates better with business stakeholders than p-values.",
+      "must_contain": ["probabilit", "positive"],
+      "must_not_contain": ["not significant", "failed"],
+      "category": "client_framing",
+      "source": "Makowski et al. (2019): Probability of Direction (pd); Muehlemann et al. (2023): posterior probabilities over p-values for non-technical audiences; Brodersen et al. (2015): 'Posterior prob. of a causal effect'"
+    },
+    {
+      "id": "assert-prob-positive-cherry-pick",
+      "description": "Must not convert cherry-picked p-value to probability claim",
+      "prompt": "I tested 48 model specifications. The best one gives p=0.039. Can I tell the client there's a 96% probability the campaign worked?",
+      "expected_behavior": "Must warn against converting a cherry-picked p-value to a probability claim. 96% (1-0.039) smuggles specification search bias into a Bayesian-sounding claim. Should recommend deriving the probability range from ALL specifications, not just the best one.",
+      "must_contain": ["specification", "range"],
+      "must_not_contain": ["96% probability"],
+      "category": "client_framing",
+      "source": "Skill Pitfall 10: probability range inflation via 1-p conversion. Gelman & Yao (2021): Pr(effect > 0) overstates certainty with flat priors."
+    },
+    {
+      "id": "assert-honest-nonsignificant",
+      "description": "Must not claim significance when p > 0.10",
+      "prompt": "The BSTS model gives p=0.18 but the effect is consistently positive across all specifications. Can I call this statistically significant?",
+      "expected_behavior": "Must not claim statistical significance. Should frame honestly: consistent positive direction is useful evidence, report the probability range (e.g., ~82% probability positive), note that the campaign duration was likely too short for significance. Should recommend longer campaigns for future measurement.",
+      "must_contain": ["not", "honest"],
+      "must_not_contain": ["statistically significant"],
+      "category": "client_framing",
+      "source": "Skill Pitfall 3: claiming significance when p > 0.10 destroys credibility."
+    },
+    {
+      "id": "assert-dual-method",
+      "description": "Must recommend running at least two independent methods",
+      "prompt": "I ran tfcausalimpact and got a significant result. Is that enough, or do I need to run other methods too?",
+      "expected_behavior": "Should recommend running at least two methods with different inference engines (e.g., tfcausalimpact + CausalPy). A single method might have bugs or assumptions that bias the result. Cross-method agreement is far more convincing than any single p-value.",
+      "must_contain": ["two", "method"],
+      "must_not_contain": ["one method is enough"],
+      "category": "methodology",
+      "source": "Skill Step 4: 'No single method is perfect.' Pitfall 6: 'Running only one method.'"
+    },
+    {
+      "id": "assert-scorecard-required",
+      "description": "Validation scorecard must include both permutation and placebo tests",
+      "prompt": "What validation checks should I run before reporting causal impact results?",
+      "expected_behavior": "Must mention BOTH: (1) pre-period placebo test (checks model calibration / FPR), and (2) permutation test with effect-size comparison (checks if real date is unusual vs random dates). Should also mention backtest WAPE, 95% coverage, and direction consistency across specs.",
+      "must_contain": ["permutation", "placebo"],
+      "must_not_contain": [],
+      "category": "validation",
+      "source": "Skill scorecard: 'Both the permutation test and pre-period placebo test are REQUIRED.' Athey & Imbens (2017): placebo as standard robustness."
+    },
+    {
+      "id": "assert-masking-perm-validation",
+      "description": "Masking must be validated with permutation test",
+      "prompt": "I masked out November-January from my pre-period to remove holiday variance. The BSTS p-value improved from 0.19 to 0.017. Can I report this as significant?",
+      "expected_behavior": "Must warn that masking can make the model overconfident — calm Feb-Oct data produces low p-values for both real AND random dates. MUST validate with a permutation test (50+ shuffles). If permutation p > 0.10 while BSTS p < 0.05, report BOTH p-values and the permutation p is the honest one.",
+      "must_contain": ["permutation", "overconfident"],
+      "must_not_contain": ["yes report it as significant"],
+      "category": "validation",
+      "source": "Skill claim framing guide: mask_nov_jan showed BSTS p=0.047 but perm p=0.22. Narrower masks (BF-Jan 5) achieved perm p=0.059."
+    },
+    {
+      "id": "assert-short-campaign-rdit",
+      "description": "Short campaigns should lead with RDiT, not BSTS",
+      "prompt": "Our promotion only ran for 4 days. Which method should I use to measure the effect?",
+      "expected_behavior": "Should recommend RDiT as the lead method for significance claims. BSTS struggles with short campaigns because daily variance overwhelms the signal. RDiT focuses on the local discontinuity at the boundary, sidestepping global variance. BSTS should still be run for the full counterfactual decomposition narrative.",
+      "must_contain": ["RDiT"],
+      "must_not_contain": [],
+      "category": "edge_cases",
+      "source": "Skill reference: 'For short campaigns (<7 days), RDiT should be the lead method.' RDiT achieved significance for 4-day promo where BSTS did not."
+    },
+    {
+      "id": "assert-nan-handling",
+      "description": "NaN from BSTS must be handled in JSON parsing",
+      "prompt": "I'm running BSTS in a batch pipeline on Cloud Run. Some results come back with NaN values and my JSON parser crashes. What should I do?",
+      "expected_behavior": "Should recommend replacing NaN before JSON parsing: raw.replace('NaN', 'null'). Should note that gsutil streaming decode silently drops NaN-containing objects.",
+      "must_contain": ["NaN", "null"],
+      "must_not_contain": [],
+      "category": "edge_cases",
+      "source": "Skill permutation pitfalls: 'NaN from BSTS: apply raw.replace(\"NaN\", \"null\") before JSON parsing.'"
+    },
+    {
+      "id": "assert-causalpy-macos-cores",
+      "description": "CausalPy on macOS requires cores=1",
+      "prompt": "CausalPy crashes on my Mac with a RuntimeError about multiprocessing bootstrapping. How do I fix it?",
+      "expected_behavior": "Should recommend setting cores=1 in sample_kwargs. The macOS multiprocessing fork issue causes this error. Should provide the exact fix: sample_kwargs={'cores': 1}.",
+      "must_contain": ["cores", "1"],
+      "must_not_contain": [],
+      "category": "edge_cases",
+      "source": "Skill environment gotchas: CausalPy macOS fork issue."
+    },
+    {
+      "id": "assert-direction-consistency",
+      "description": "Direction consistency across specs is strong evidence even without significance",
+      "prompt": "None of my 12 model specifications achieve p < 0.10, but all 12 show a positive effect. Is this meaningful?",
+      "expected_behavior": "Should affirm that unanimous positive direction across 12 specs is strong evidence of a genuine positive effect. This is the most robust finding — foreground it. Recommend reporting the Bayesian posterior probability range across all specs.",
+      "must_contain": ["direction", "positive"],
+      "must_not_contain": ["meaningless", "not useful"],
+      "category": "interpretation",
+      "source": "Skill claim framing: 'The convergence of all specs on a positive direction IS the strongest evidence.' Scorecard: 'all specs same direction ≥ (N-1)/N.'"
+    },
+    {
+      "id": "assert-method-disagreement",
+      "description": "When methods disagree on direction, report both honestly",
+      "prompt": "BSTS shows +15% effect but CausalPy shows -3% effect. How do I interpret this disagreement?",
+      "expected_behavior": "Must report both results honestly without hiding the disagreement. Should check for outliers (flag any method whose effect disagrees in sign with majority or exceeds 3x median). Should use median not mean for consensus. Should NOT cherry-pick the positive result.",
+      "must_contain": ["honest", "both"],
+      "must_not_contain": ["ignore the negative"],
+      "category": "interpretation",
+      "source": "Skill: 'If methods disagree on direction, report both results honestly.' Consensus: use median, flag 3x outliers."
+    },
+    {
+      "id": "assert-vi-stochasticity",
+      "description": "VI single-run p-value differences < 0.03 are noise",
+      "prompt": "I ran BSTS with VI twice and got p=0.04 the first time and p=0.07 the second time. Which one should I report?",
+      "expected_behavior": "Should explain that VI is non-deterministic — single-run differences of ±0.04 are noise, not signal. For definitive comparisons, use HMC (deterministic given seed) or average 5+ VI runs. Should NOT make recommendations based on single-run differences < 0.03.",
+      "must_contain": ["noise", "non-deterministic"],
+      "must_not_contain": [],
+      "category": "interpretation",
+      "source": "Skill VI stochasticity warning: 'the same spec can range p=0.03-0.08 between runs.'"
+    },
+    {
+      "id": "assert-sale-covariate-zeroing",
+      "description": "Sale covariates must be zeroed during treatment window when intervention IS a sale",
+      "prompt": "I'm measuring the impact of our January sale. I have a sale_type_flag covariate. Should I include it?",
+      "expected_behavior": "Should explain that when the intervention IS a sale, sale covariates capture the campaign itself. Must zero them during the treatment window so the model only learns from historical sale patterns. Should NOT exclude them entirely — the pre-period signal is valuable.",
+      "must_contain": ["zero"],
+      "must_not_contain": ["exclude entirely", "remove the covariate"],
+      "category": "covariates",
+      "source": "Skill ADR 0020: treatment-window zeroing. Validated: unzeroed p=0.074, zeroed combined p=0.033."
+    },
+    {
+      "id": "assert-pre-period-fit",
+      "description": "Poor pre-period model fit invalidates the counterfactual",
+      "prompt": "I ran CausalImpact on our email campaign. The pre-period plot shows the model prediction hovering around the mean while actual data swings +/-40%. The summary reports +18% with p=0.08. Should I trust this?",
+      "expected_behavior": "Must warn that pre-period R-squared below ~0.70 is a failure condition, not just a warning. The counterfactual is unreliable when the model cannot track pre-period dynamics. Should recommend adding covariates that co-move with the outcome before drawing inference. Reporting p=0.08 from a poorly-fitting model is not valid.",
+      "must_contain": ["pre-period", "fit"],
+      "must_not_contain": ["yes you can trust", "looks good"],
+      "category": "validation",
+      "source": "Brodersen et al. (2015): pre-period predictive accuracy is the core validity check. CausalImpact vignette: 'examine how well the outcome data can be predicted before the beginning of the intervention.'"
+    },
+    {
+      "id": "assert-structural-break",
+      "description": "Structural breaks in pre-period corrupt the counterfactual baseline",
+      "prompt": "Our pre-period runs from January 2021 to November 2024. We relaunched the website in April 2022 which caused a permanent +30% step up in sessions. I kept the full pre-period for more data. The pre-period plot fits reasonably overall. Is there a problem?",
+      "expected_behavior": "Must warn that a structural break means the model is fitting across two regimes. The level shift biases seasonal and trend estimates. Should recommend either starting the pre-period after the known break, or explicitly modeling the break date. Should NOT treat 'more data is always better' as safe.",
+      "must_contain": ["break", "regime"],
+      "must_not_contain": ["no problem", "more data is better"],
+      "category": "validation",
+      "source": "Zeileis et al. (2003): CUSUM/fluctuation tests for structural change. Bai & Perron (2003): sequential test for unknown break count."
+    },
+    {
+      "id": "assert-residual-autocorrelation",
+      "description": "Residual autocorrelation means model missed serial structure",
+      "prompt": "I set nseasons=7 for my daily data. The pre-period plot looks good visually. The ACF of residuals shows a spike at lag 14. The Ljung-Box test at lag 14 gives p=0.003. My causal impact estimate is p=0.04. Should I be worried?",
+      "expected_behavior": "Must warn that significant residual autocorrelation at lag 14 means the model missed a fortnightly cycle. The stated p=0.04 is probably too optimistic because confidence intervals are too narrow. Should recommend trying nseasons=14 or adding a payday covariate and re-running.",
+      "must_contain": ["autocorrelation"],
+      "must_not_contain": ["looks fine", "no concern"],
+      "category": "validation",
+      "source": "Ljung & Box (1978): standard diagnostic for state-space model adequacy. Residual autocorrelation at seasonal lags indicates the model's seasonality period is wrong."
+    },
+    {
+      "id": "assert-pre-trend-sensitivity",
+      "description": "Pre-existing trend toward the effect direction may inflate the estimate",
+      "prompt": "My campaign ran in February. Looking at the pre-period chart, revenues were already rising in January before the campaign. The BSTS model captures this rising trend. My estimated effect is +15% with p=0.04. Is there a concern?",
+      "expected_behavior": "Must warn that a pre-existing positive trend is a confound. The model projects a rising counterfactual which partly explains the positive result, but there is sensitivity to how much of the post-period rise is trend continuation vs causal impact. Should recommend a sensitivity analysis showing how the estimate changes if the pre-trend is extrapolated more steeply.",
+      "must_contain": ["trend", "confound"],
+      "must_not_contain": ["no concern"],
+      "category": "interpretation",
+      "source": "Roth (2022, AER:I): pre-trend testing does not guarantee parallel trends hold post-intervention. Rambachan & Roth (2023, RES): sensitivity bounds for trend violations."
+    },
+    {
+      "id": "assert-regression-to-mean",
+      "description": "Campaign after unusual dip gets free 'lift' from mean reversion",
+      "prompt": "Sales dropped 35% below normal in the two weeks before our campaign due to bad PR. We launched the campaign to counter it. After the campaign, sales recovered to near-normal levels. BSTS attributes +18% lift (p=0.03). Is regression to the mean a concern?",
+      "expected_behavior": "Must warn that a 35% pre-campaign dip followed by return to normal is the textbook regression-to-the-mean pattern. BSTS projects continued below-normal counterfactual because the pre-period end is near the dip. Should ask what the counterfactual recovery would look like without the campaign.",
+      "must_contain": ["regression to the mean"],
+      "must_not_contain": ["campaign clearly worked"],
+      "category": "interpretation",
+      "source": "Campbell & Kenny (1999): extreme-group selection guarantees mechanical reversion. Marketing teams launch campaigns when sales are weak, creating systematic regression-to-mean bias."
+    },
+    {
+      "id": "assert-minimum-detectable-effect",
+      "description": "Underpowered studies produce uninformative non-significant results",
+      "prompt": "My campaign ran for 4 days. Pre-period daily revenue standard deviation is about 45K. My estimated effect is +85K total (~21K/day). The p-value is 0.11. Does this mean the campaign had no effect?",
+      "expected_behavior": "Must NOT conclude 'no effect' from a non-significant result in an underpowered design. Should calculate the minimum detectable effect (MDE) given the noise level and campaign duration. For a 4-day campaign with 45K daily SD, effects below ~140K are undetectable. The correct interpretation is 'we cannot detect effects smaller than approximately X with this study design.'",
+      "must_contain": ["power", "detect"],
+      "must_not_contain": ["no effect", "campaign didn't work"],
+      "category": "interpretation",
+      "source": "Schochet (2022, JEBS): MDE for ITS estimators. Djimeu & Houndolo (2016): power calculation for causal inference."
+    },
+    {
+      "id": "assert-anticipation-effects",
+      "description": "Pre-announced campaigns contaminate the end of the pre-period",
+      "prompt": "Our campaign started March 1st. We sent a teaser email on February 25th. I used all data up to February 28th as my pre-period. The last few days show a small uptick. My estimate is +12% with p=0.06. Is the pre-period end date correct?",
+      "expected_behavior": "Must warn that the last 5-7 days of the pre-period are contaminated by anticipation effects from the teaser email. Should recommend truncating the pre-period to before the teaser (February 24th at the latest) and re-running. Including anticipation-contaminated days in the baseline biases the counterfactual.",
+      "must_contain": ["anticipat"],
+      "must_not_contain": ["pre-period is fine"],
+      "category": "methodology",
+      "source": "Malani & Reif (2015, J Public Econ): pre-trends as anticipation produce underestimates of treatment effects when not accounted for."
+    },
+    {
+      "id": "assert-log-retransformation",
+      "description": "Naive exp() of log-scale effects underestimates mean currency amounts",
+      "prompt": "I fitted BSTS on log(daily revenue). The posterior mean of the cumulative log-scale effect is 0.18 (~+18%). To convert to pounds I exponentiated: exp(0.18) x baseline = +410K. My client wants the expected total uplift in pounds for ROI. Is this right?",
+      "expected_behavior": "Must explain that for the median effect, exp(posterior median) is correct. But for the mean expected uplift (what finance needs for ROI), naive exponentiation is biased downward by Jensen's inequality. Should recommend Duan's smearing correction or half-variance correction exp(mu + sigma^2/2). The bias is typically 0.5-4.5% at enterprise scales.",
+      "must_contain": ["Jensen", "bias"],
+      "must_not_contain": [],
+      "category": "methodology",
+      "source": "Duan (1983, JASA): smearing estimate for nonparametric retransformation. E[exp(X)] > exp(E[X]) by Jensen's inequality."
+    },
+    {
+      "id": "assert-sca-joint-inference",
+      "description": "Proportion of positive specs is not a p-value without joint test",
+      "prompt": "My SCA across 440 specs shows 87% positive direction and 87 specs with p<0.05. Only 6 specs are negative. Isn't that strong evidence? Can I report this as statistically validated?",
+      "expected_behavior": "Must explain that direction consistency is qualitatively compelling but does not replace formal inference. The correct SCA inference requires a shuffle test: permute the outcome, rerun all specs, compute the fraction of shuffles where as many specs are significant as observed. Without that joint test, cannot claim p-level significance from spec proportions alone.",
+      "must_contain": ["joint", "shuffle"],
+      "must_not_contain": ["yes that's statistically validated"],
+      "category": "methodology",
+      "source": "Simonsohn, Simmons & Nelson (2020, Nature Human Behaviour): specification curve analysis Step 3 — joint inference via permutation omnibus test."
+    },
+    {
+      "id": "assert-model-selection-not-on-p",
+      "description": "Must not select winning spec based on post-period p-value alone",
+      "prompt": "I ran 10 specifications. The one with p=0.03 uses 9 covariates including Google Trends and sale intensity. Two simpler specs give p=0.11. I want to report the p=0.03 spec. Is it legitimate to pick the spec with the best p-value?",
+      "expected_behavior": "Must warn that selecting a spec because it produces the lowest p-value is circular and inflates false positive rates. Model selection should use a pre-period criterion (LOO-CV, held-out RMSE, or Harvey's R-squared), not the post-period p-value. The winning spec should predict the pre-period best, then its post-period p is reported without cherry-picking.",
+      "must_contain": ["circular", "pre-period"],
+      "must_not_contain": ["yes report the p=0.03"],
+      "category": "validation",
+      "source": "Vehtari, Gelman & Gabry (2017, Stat. Computing): PSIS-LOO for model comparison. Selecting on post-period p is equivalent to multiple testing without correction."
+    },
+    {
+      "id": "assert-time-varying-effects",
+      "description": "Must check if effect decays within the post-period (pull-forward risk)",
+      "prompt": "My 4-day campaign shows a cumulative lift of +290K. But the daily pointwise effects show 90% of the lift on day 1. Days 2-4 show near-zero effect. The client wants to know if the campaign 'worked.' What should I tell them?",
+      "expected_behavior": "Must explain that a front-loaded effect profile could be genuine launch-day demand OR demand pull-forward that will be followed by suppression. Should recommend inspecting post-campaign weeks for demand dip below counterfactual. If post-campaign sales dip, the net cumulative effect over a longer window (e.g., 4 weeks) is the correct measure of true incremental revenue.",
+      "must_contain": ["pull-forward"],
+      "must_not_contain": ["campaign definitely worked"],
+      "category": "interpretation",
+      "source": "Brodersen et al. (2015): three output panels (pointwise, cumulative) exist for this purpose. Shadish, Cook & Campbell (2002): ITS design variants for treatment effect heterogeneity over time."
+    },
+    {
+      "id": "assert-covariate-sutva",
+      "description": "Campaign may have lifted the covariates themselves (SUTVA violation)",
+      "prompt": "I used Google Trends for 'trainers UK' as a covariate. My campaign included a TV ad about trainers. After the campaign, 'trainers UK' search volume went up 15%. Could this affect my estimate?",
+      "expected_behavior": "Must warn this is a covariate SUTVA violation — the campaign lifted category-level search. The counterfactual absorbs some of the real effect, underestimating the true lift. Should recommend testing sensitivity with and without this covariate. A >10% change in the point estimate signals contamination.",
+      "must_contain": ["contaminat"],
+      "must_not_contain": ["no effect on estimate"],
+      "category": "covariates",
+      "source": "Rubin (1980): SUTVA. Pearl (2009): d-separation and covariate contamination. Extends assert-covariate-contamination to category-level search signals."
+    }
+  ],
+  "triggers": [
+    {
+      "id": "pos-1",
+      "prompt": "Did the campaign actually work? I need to measure the revenue uplift from our Black Friday promo.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Direct trigger: 'did the campaign work' + revenue uplift"
+    },
+    {
+      "id": "pos-2",
+      "prompt": "Measure the causal impact of our delivery promotion on daily revenue",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Exact phrase: 'causal impact' + campaign context"
+    },
+    {
+      "id": "pos-3",
+      "prompt": "What was the incrementality of our paid social campaign last month?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger keyword: 'incrementality' + campaign"
+    },
+    {
+      "id": "pos-4",
+      "prompt": "We ran a free delivery promo for 10 days \u2014 can you estimate the revenue lift?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'revenue lift' + promo with time-bounded intervention"
+    },
+    {
+      "id": "pos-5",
+      "prompt": "I want to attribute the conversion spike to the price reduction we did in March",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Attribution of metric change to specific intervention"
+    },
+    {
+      "id": "pos-6",
+      "prompt": "Can you measure the promo effect on our e-commerce transactions using our GA4 data?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'promo effect' + GA4 data"
+    },
+    {
+      "id": "pos-7",
+      "prompt": "We need to run a campaign uplift analysis \u2014 we have daily revenue data in BigQuery",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'campaign uplift' + BigQuery data source"
+    },
+    {
+      "id": "pos-8",
+      "prompt": "How much additional revenue did our marketing campaign generate? There's no control group.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "No control group + campaign effect measurement \u2014 exactly this skill's niche"
+    },
+    {
+      "id": "pos-9",
+      "prompt": "Use Bayesian structural time series to estimate the effect of our ad spend increase",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Explicit methodology mention: BSTS + intervention effect"
+    },
+    {
+      "id": "pos-10",
+      "prompt": "Did the price change cause the revenue drop, or was it just seasonal?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Causal attribution question: price change effect vs seasonality"
+    },
+    {
+      "id": "pos-11",
+      "prompt": "Run tfcausalimpact and CausalPy on our campaign data to cross-validate the results",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Exact tools mentioned: tfcausalimpact + CausalPy dual method"
+    },
+    {
+      "id": "pos-12",
+      "prompt": "We launched a site-wide 20% discount last week. What was the true effect on conversions?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Time-bounded intervention + causal effect on metric"
+    },
+    {
+      "id": "pos-13",
+      "prompt": "Quantify the ROI of our influencer campaign using counterfactual analysis",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Counterfactual analysis of campaign ROI"
+    },
+    {
+      "id": "pos-14",
+      "prompt": "I need to present to stakeholders whether our marketing intervention moved the needle on revenue",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Client-facing deliverable about intervention effectiveness"
+    },
+    {
+      "id": "pos-15",
+      "prompt": "Estimate the causal uplift from our email campaign using time series data",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "Trigger: 'causal uplift' + time series"
+    },
+    {
+      "id": "pos-16",
+      "prompt": "I need to run a placebo test to validate my BSTS causal impact results. How do I check if the model is well-calibrated?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "NEW: Merged from bsts-placebo-calibration. Trigger: 'placebo test' + BSTS validation"
+    },
+    {
+      "id": "pos-17",
+      "prompt": "My BSTS model gives p=0.03 but I'm worried the p-value might be inflated. How do I validate it with a permutation test?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "NEW: Merged from permutation-validation. Trigger: 'validate p-value' + permutation"
+    },
+    {
+      "id": "pos-18",
+      "prompt": "Is my BSTS result overfit? The pre-period fit looks too good and I only have 50 days of data with 7 covariates.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "NEW: Merged from bsts-placebo-calibration. Trigger: 'overfit' + BSTS + short pre-period"
+    },
+    {
+      "id": "pos-19",
+      "prompt": "I need to check the false positive rate of my causal impact model before reporting results to the client.",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "NEW: Merged content. Trigger: 'false positive rate' + causal impact"
+    },
+    {
+      "id": "pos-20",
+      "prompt": "How many permutation shuffles do I need for a robust significance test of my campaign effect?",
+      "should_trigger": true,
+      "category": "positive",
+      "notes": "NEW: Merged from permutation-validation. Trigger: 'permutation shuffles' + significance"
+    },
+    {
+      "id": "neg-1",
+      "prompt": "Set up an A/B test for our new checkout flow with random assignment",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "A/B testing with randomization \u2014 different methodology"
+    },
+    {
+      "id": "neg-2",
+      "prompt": "Show me the correlation between ad spend and revenue over the last year",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Correlation analysis, not causal impact estimation"
+    },
+    {
+      "id": "neg-3",
+      "prompt": "Forecast next quarter's revenue using Prophet or ARIMA",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Time series forecasting, not intervention effect measurement"
+    },
+    {
+      "id": "neg-4",
+      "prompt": "Build a marketing attribution model across all our channels",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Multi-touch attribution \u2014 different from single-campaign causal impact"
+    },
+    {
+      "id": "neg-5",
+      "prompt": "Create a dashboard showing our key marketing metrics over time",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "General analytics dashboard, not causal analysis"
+    },
+    {
+      "id": "neg-6",
+      "prompt": "Analyze customer segments and their purchase patterns",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Customer segmentation, not campaign impact"
+    },
+    {
+      "id": "neg-7",
+      "prompt": "Help me design a randomized controlled experiment to test pricing",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "RCT design \u2014 opposite of observational causal inference"
+    },
+    {
+      "id": "neg-8",
+      "prompt": "What's the best way to do media mix modeling?",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "MMM is a different methodology from campaign-level causal impact"
+    },
+    {
+      "id": "neg-9",
+      "prompt": "Optimize our Google Ads bidding strategy using machine learning",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Ad optimization, not post-hoc impact measurement"
+    },
+    {
+      "id": "neg-10",
+      "prompt": "Build a churn prediction model from our user data",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Predictive modeling, not causal inference"
+    },
+    {
+      "id": "neg-11",
+      "prompt": "Write a SQL query to calculate monthly revenue growth",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Simple SQL analytics, not causal analysis"
+    },
+    {
+      "id": "neg-12",
+      "prompt": "Compare the performance of our email campaigns using open rates and CTR",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "Campaign performance reporting, not causal impact estimation"
+    },
+    {
+      "id": "neg-13",
+      "prompt": "Run a sensitivity analysis on my neural network hyperparameters",
+      "should_trigger": false,
+      "category": "negative",
+      "notes": "ML hyperparameter tuning, not causal inference sensitivity"
+    },
+    {
+      "id": "edge-1",
+      "prompt": "Our campaign only ran for 3 days \u2014 can we still measure the impact?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Very short campaign \u2014 skill covers this with SNR warnings and RDiT recommendation"
+    },
+    {
+      "id": "edge-2",
+      "prompt": "We had two promotions running at the same time \u2014 can you separate their effects?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Concurrent interventions \u2014 skill addresses confounding"
+    },
+    {
+      "id": "edge-3",
+      "prompt": "Is the revenue increase from the campaign or just the normal Christmas spike?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Seasonality confounding \u2014 core challenge addressed by skill"
+    },
+    {
+      "id": "edge-4",
+      "prompt": "We have a geo-targeted campaign \u2014 should we use synthetic control instead?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Geo-targeting enables stronger designs \u2014 skill mentions this"
+    },
+    {
+      "id": "edge-5",
+      "prompt": "Can you measure campaign effect if we only have weekly aggregated data?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Data granularity limitation \u2014 skill assumes daily but should handle"
+    },
+    {
+      "id": "edge-6",
+      "prompt": "The p-value is 0.12 \u2014 does that mean the campaign didn't work?",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Statistical interpretation \u2014 skill covers honest communication of marginal results"
+    },
+    {
+      "id": "edge-7",
+      "prompt": "Run a difference-in-differences analysis on our campaign data",
+      "should_trigger": false,
+      "category": "edge",
+      "notes": "DiD is adjacent but different from BSTS causal impact \u2014 borderline"
+    },
+    {
+      "id": "edge-8",
+      "prompt": "We want to measure if changing our delivery policy affected order volume",
+      "should_trigger": true,
+      "category": "edge",
+      "notes": "Policy change as intervention \u2014 fits the skill even without 'campaign' keyword"
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "tc-1",
+      "prompt": "We ran a free delivery promotion from March 1-10 and want to know if it actually increased revenue. We have daily GA4 data in BigQuery.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(causal|counterfactual|intervention|treatment)",
+          "description": "Frames as causal inference problem"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(covariate|control|organic|session)",
+          "description": "Discusses covariate selection and safety"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(tfcausalimpact|causalpy|bayesian|BSTS)",
+          "description": "References the dual-method approach"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(pre.?period|post.?period|intervention.?date|window)",
+          "description": "Defines analysis windows"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(credible|confidence|interval|p.?value|significance)",
+          "description": "Discusses statistical inference"
+        }
+      ]
+    },
+    {
+      "id": "tc-2",
+      "prompt": "Did our Black Friday campaign work? Revenue jumped but it might just be seasonal. We have 2 years of daily data.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(seasonal|holiday|Black Friday|cycle)",
+          "description": "Addresses seasonality as a confounder"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(covariate|control|organic)",
+          "description": "Discusses safe covariates for seasonal isolation"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(validate|validation|placebo|assumption)",
+          "description": "Includes validation steps"
+        }
+      ]
+    },
+    {
+      "id": "tc-3",
+      "prompt": "Measure the incrementality of our paid social campaign. We have daily revenue and traffic data but no holdout group.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(no.*(control|holdout|randomiz)|observational|quasi.?experiment)",
+          "description": "Acknowledges lack of randomized control"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(paid.*session|traffic|absorb|bias|safe)",
+          "description": "Warns about paid traffic covariates absorbing signal"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(incremental|uplift|effect|impact)",
+          "description": "Quantifies incremental effect"
+        }
+      ]
+    },
+    {
+      "id": "tc-4",
+      "prompt": "Our stakeholders want a client-ready report on whether the marketing campaign lifted conversions. Make it non-technical.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(client|stakeholder|non.?technical|plain|executive)",
+          "description": "Adapts communication for non-technical audience"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(visual|chart|plot|graph|HTML|Plotly)",
+          "description": "Includes visualization deliverables"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(finding|conclusion|recommend|summary)",
+          "description": "Produces actionable findings"
+        }
+      ]
+    },
+    {
+      "id": "tc-5",
+      "prompt": "Run causal impact analysis but the campaign was only 4 days long and our revenue is very volatile.",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(short|brief|few days|limited|duration)",
+          "description": "Acknowledges short campaign duration challenge"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(SNR|signal.?to.?noise|volatil|noisy|detect)",
+          "description": "Discusses signal-to-noise ratio"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(warn|caveat|limitation|may not|difficult|unlikely)",
+          "description": "Sets appropriate expectations about statistical power"
+        }
+      ]
+    },
+    {
+      "id": "tc-6",
+      "prompt": "Compare tfcausalimpact and CausalPy results \u2014 they disagree on whether the promo had an effect. How do I interpret this?",
+      "input_files": [],
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(disagree|conflict|differ|inconsist|diverge)",
+          "description": "Addresses method disagreement"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(robust|sensitiv|cross.?valid|both|converge)",
+          "description": "Discusses cross-method robustness"
+        },
+        {
+          "type": "pattern",
+          "value": "(?i)(interpret|conclude|honest|uncertain|direction)",
+          "description": "Provides honest interpretation guidance"
+        }
+      ]
+    }
+  ],
+  "edge_cases": [
+    {
+      "id": "ec-1",
+      "prompt": "causal impact",
+      "category": "minimal_input",
+      "expected_behavior": "Ask for context: what campaign, what metric, what data is available",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(what|which|campaign|metric|data|tell me|describe|context)",
+          "description": "Asks for clarification about the specific campaign and data"
+        }
+      ]
+    },
+    {
+      "id": "ec-2",
+      "prompt": "We had 5 different campaigns running simultaneously over the same period. Measure each one's impact separately.",
+      "category": "concurrent_interventions",
+      "expected_behavior": "Warn that concurrent interventions confound each other, suggest alternative approaches",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(confound|overlap|simultaneous|concurrent|separate|isolate|difficult)",
+          "description": "Identifies the confounding problem"
+        }
+      ]
+    },
+    {
+      "id": "ec-3",
+      "prompt": "Measure the campaign impact but we only have 2 weeks of pre-campaign data",
+      "category": "insufficient_data",
+      "expected_behavior": "Warn about insufficient pre-period for reliable counterfactual estimation",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(insufficient|short|more data|longer|pre.?period|minimum|at least)",
+          "description": "Warns about insufficient pre-period data"
+        }
+      ]
+    },
+    {
+      "id": "ec-4",
+      "prompt": "The causal impact shows the campaign had a negative effect \u2014 the client won't accept this. What do I do?",
+      "category": "stakeholder_conflict",
+      "expected_behavior": "Guide honest communication, validate the result, do not suggest hiding it",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(honest|transparent|validate|verify|check|robust|present)",
+          "description": "Advocates for honest statistical communication"
+        }
+      ]
+    },
+    {
+      "id": "ec-5",
+      "prompt": "Can I use causal impact analysis on monthly data? We only have 18 monthly data points.",
+      "category": "low_granularity",
+      "expected_behavior": "Explain limitations of monthly granularity and low sample size for BSTS",
+      "assertions": [
+        {
+          "type": "pattern",
+          "value": "(?i)(monthly|granular|few|observation|sample|power|limited|daily)",
+          "description": "Addresses monthly granularity limitations"
+        }
+      ]
+    }
+  ]
+}

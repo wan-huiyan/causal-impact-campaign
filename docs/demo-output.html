@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=900">
+<title>Policy Impact — Demo Output</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Manrope:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f7f5f0;
+    --card: #ffffff;
+    --ink: #1b1b18;
+    --ink-soft: #4a4a42;
+    --ink-muted: #8a8a7e;
+    --green: #15803d;
+    --green-bg: #f0fdf4;
+    --green-border: #bbf7d0;
+    --green-bright: #16a34a;
+    --blue: #1e40af;
+    --blue-bg: #eff6ff;
+    --blue-border: #bfdbfe;
+    --amber-bg: #fffbeb;
+    --amber-border: #fde68a;
+    --amber: #92400e;
+    --border: #e5e2da;
+    --serif: 'DM Serif Display', Georgia, serif;
+    --sans: 'Manrope', system-ui, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #ddd9d0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: var(--sans);
+  }
+
+  .card {
+    width: 900px;
+    background: var(--bg);
+    overflow: hidden;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.1);
+    position: relative;
+  }
+
+  /* Top accent */
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--green) 0%, var(--green-bright) 60%, #a3e635 100%);
+  }
+
+  /* Header */
+  .header {
+    padding: 32px 36px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+  }
+
+  .header-left h1 {
+    font-family: var(--serif);
+    font-size: 26px;
+    font-weight: 400;
+    color: var(--ink);
+    line-height: 1.2;
+  }
+
+  .header-left .subtitle {
+    font-size: 12.5px;
+    color: var(--ink-muted);
+    margin-top: 4px;
+    font-weight: 400;
+  }
+
+  .verdict-badge {
+    background: var(--green-bg);
+    border: 1px solid var(--green-border);
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border-radius: 4px;
+    margin-top: 4px;
+  }
+
+  /* Stats row */
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+    padding: 0 36px 20px;
+  }
+
+  .stat-box {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+    text-align: center;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-family: var(--serif);
+    font-size: 32px;
+    color: var(--green);
+    line-height: 1;
+  }
+
+  .stat-value .unit {
+    font-size: 16px;
+    color: var(--ink-muted);
+    font-family: var(--sans);
+    font-weight: 400;
+  }
+
+  .stat-badge {
+    display: inline-block;
+    margin-top: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid var(--green-border);
+  }
+
+  /* Two-column section */
+  .columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 0 36px 20px;
+  }
+
+  .col-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px 18px;
+  }
+
+  .col-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .col-title.blue { color: var(--blue); }
+  .col-title.amber { color: var(--amber); }
+
+  /* Method rows */
+  .method-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0ede7;
+    font-size: 12.5px;
+  }
+
+  .method-row:last-child { border-bottom: none; }
+
+  .method-name {
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 11.5px;
+  }
+
+  .method-name .tech {
+    font-weight: 400;
+    color: var(--ink-muted);
+    font-size: 10.5px;
+  }
+
+  .method-result {
+    color: var(--ink-soft);
+    font-size: 12px;
+    text-align: right;
+  }
+
+  .method-result strong {
+    color: var(--green);
+    font-weight: 600;
+  }
+
+  /* Decision bullets */
+  .decision-item {
+    display: flex;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 12px;
+    color: var(--ink-soft);
+    line-height: 1.5;
+  }
+
+  .decision-icon {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    margin-top: 1px;
+  }
+
+  .decision-icon.subtract {
+    background: #fef2f2;
+    color: #dc2626;
+    border: 1px solid #fecaca;
+  }
+
+  .decision-icon.add {
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid var(--green-border);
+  }
+
+  .decision-item strong {
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* Footer */
+  .footer {
+    padding: 14px 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10.5px;
+    color: var(--ink-muted);
+    border-top: 1px solid var(--border);
+    background: #f3f1eb;
+  }
+
+  .footer .validation {
+    display: flex;
+    gap: 12px;
+  }
+
+  .footer .check {
+    color: var(--green);
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1>Policy Impact: 20 mph Speed Limit Rollout</h1>
+      <div class="subtitle">Feb 3–28, 2026 &nbsp;|&nbsp; Daily accident count &nbsp;|&nbsp; Bayesian Structural Time Series</div>
+    </div>
+    <div class="verdict-badge">Significant</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat-box">
+      <div class="stat-label">Estimated Reduction</div>
+      <div class="stat-value">&minus;23<span class="unit"> acc/day</span></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">Probability of Effect</div>
+      <div class="stat-value">97.2<span class="unit">%</span></div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-label">p-value</div>
+      <div class="stat-value">0.028</div>
+      <div class="stat-badge">significant at p &lt; 0.05</div>
+    </div>
+  </div>
+
+  <!-- Two columns -->
+  <div class="columns">
+
+    <!-- Dual method -->
+    <div class="col-card">
+      <div class="col-title blue">Dual-Method Agreement</div>
+      <div class="method-row">
+        <div>
+          <div class="method-name">tfcausalimpact <span class="tech">(BSTS)</span></div>
+        </div>
+        <div class="method-result"><strong>&minus;23 acc/day</strong>, p=0.028</div>
+      </div>
+      <div class="method-row">
+        <div>
+          <div class="method-name">CausalPy <span class="tech">(RDiT)</span></div>
+        </div>
+        <div class="method-result"><strong>&minus;26 acc/day</strong>, p=0.019</div>
+      </div>
+      <div style="margin-top: 8px; font-size: 11px; color: var(--green); font-weight: 500;">
+        Both methods agree on direction and magnitude
+      </div>
+    </div>
+
+    <!-- Key decisions -->
+    <div class="col-card">
+      <div class="col-title amber">Key Modelling Decisions</div>
+      <div class="decision-item">
+        <div class="decision-icon subtract">&minus;</div>
+        <div>Excluded <strong>school holiday period</strong> — CI width reduced 19%</div>
+      </div>
+      <div class="decision-item">
+        <div class="decision-icon subtract">&minus;</div>
+        <div>Removed <strong>construction_zones</strong> covariate — was absorbing 8 accidents/day of effect</div>
+      </div>
+      <div class="decision-item">
+        <div class="decision-icon add">+</div>
+        <div>Added <strong>rainfall + daylight hours</strong> — multi-modal curve (r=0.791)</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div>Prepared by [Analyst] &nbsp;|&nbsp; March 2026</div>
+    <div class="validation">
+      <span><span class="check">&#x2713;</span> 3 backtests passed</span>
+      <span><span class="check">&#x2713;</span> 1 placebo passed</span>
+      <span><span class="check">&#x2713;</span> Cross-method validated</span>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

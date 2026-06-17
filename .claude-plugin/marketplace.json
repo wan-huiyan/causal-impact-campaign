@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "wan-huiyan-causal-impact-campaign",
+  "description": "Single-plugin marketplace for causal-impact-campaign — a Claude Code skill for measuring the causal impact of marketing campaigns, promos, and interventions using Bayesian structural time series.",
+  "owner": {
+    "name": "Huiyan Wan"
+  },
+  "plugins": [
+    {
+      "name": "causal-impact-campaign",
+      "source": "./plugins/causal-impact-campaign",
+      "description": "Causal impact measurement for marketing campaigns using Bayesian structural time series. Includes permutation validation, placebo calibration, Specification Curve Analysis, a methodology communication guide (verified tfcausalimpact p-value formula + identification assumptions + 'three tests, three different questions' framing + 'diagnose, don't demote' protocol), and 34 research-backed eval assertions.",
+      "version": "2.4.0"
+    }
+  ]
+}
