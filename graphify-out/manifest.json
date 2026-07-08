@@ -1,0 +1,112 @@
+{
+  ".claude-plugin/marketplace.json": {
+    "mtime": 1783508108.576104,
+    "ast_hash": "0335aa8529c765598c9a33df84d12362",
+    "semantic_hash": "0335aa8529c765598c9a33df84d12362"
+  },
+  "eval-suite.json": {
+    "mtime": 1783508108.583236,
+    "ast_hash": "769cfbd0516db9c05626a28dc1881f3c",
+    "semantic_hash": "769cfbd0516db9c05626a28dc1881f3c"
+  },
+  "package.json": {
+    "mtime": 1783508108.5835686,
+    "ast_hash": "da1d3edaf83aabbcb7a4fe0e323246ff",
+    "semantic_hash": "da1d3edaf83aabbcb7a4fe0e323246ff"
+  },
+  "plugins/causal-impact-campaign/.claude-plugin/plugin.json": {
+    "mtime": 1783508108.5841968,
+    "ast_hash": "2a136562eb8eaba1e083313420e437f7",
+    "semantic_hash": "2a136562eb8eaba1e083313420e437f7"
+  },
+  "tests/eval-suite-integrity.test.mjs": {
+    "mtime": 1783508108.587914,
+    "ast_hash": "3b5bd70027d8a6bd665bfd9b6d9b3a40",
+    "semantic_hash": "3b5bd70027d8a6bd665bfd9b6d9b3a40"
+  },
+  "tests/manifest-consistency.test.mjs": {
+    "mtime": 1783508108.5885239,
+    "ast_hash": "6a13214f991eadc0917c4b8608712e99",
+    "semantic_hash": "6a13214f991eadc0917c4b8608712e99"
+  },
+  "tests/trigger-classification.test.mjs": {
+    "mtime": 1783508108.588886,
+    "ast_hash": "5ef1ccb7a7316f75f8d14ffaa922c9a0",
+    "semantic_hash": "5ef1ccb7a7316f75f8d14ffaa922c9a0"
+  },
+  ".github/workflows/test.yml": {
+    "mtime": 1783508108.5766,
+    "ast_hash": "0a23e37077d7936ed56c7ef8fc8db147",
+    "semantic_hash": "0a23e37077d7936ed56c7ef8fc8db147"
+  },
+  "README.md": {
+    "mtime": 1783508108.577136,
+    "ast_hash": "30b54994c5fdb4d48bff58fa8ffc6450",
+    "semantic_hash": "30b54994c5fdb4d48bff58fa8ffc6450"
+  },
+  "docs/README-v1.6.md": {
+    "mtime": 1783508108.5776641,
+    "ast_hash": "fbb6f532a6ff72d9448c7cf0ce6d7032",
+    "semantic_hash": "fbb6f532a6ff72d9448c7cf0ce6d7032"
+  },
+  "docs/case-study.md": {
+    "mtime": 1783508108.5779872,
+    "ast_hash": "c9e95dfff949b5fcdf82e4e5d0d9c8b0",
+    "semantic_hash": "c9e95dfff949b5fcdf82e4e5d0d9c8b0"
+  },
+  "docs/demo-output.html": {
+    "mtime": 1783508108.5808835,
+    "ast_hash": "01280c20d80054b9b7cb7ab04af9b286",
+    "semantic_hash": "01280c20d80054b9b7cb7ab04af9b286"
+  },
+  "docs/techniques.md": {
+    "mtime": 1783508108.5827823,
+    "ast_hash": "60cb70eec6bb1200e041d8468af40a10",
+    "semantic_hash": "60cb70eec6bb1200e041d8468af40a10"
+  },
+  "plugins/causal-impact-campaign/SKILL.md": {
+    "mtime": 1783508108.584911,
+    "ast_hash": "e5dda43422e93cab9b8c7c2740b2133e",
+    "semantic_hash": "e5dda43422e93cab9b8c7c2740b2133e"
+  },
+  "plugins/causal-impact-campaign/references/benchmarks_and_methods.md": {
+    "mtime": 1783508108.585363,
+    "ast_hash": "a83c328f3771f36726391327f2dcb178",
+    "semantic_hash": "a83c328f3771f36726391327f2dcb178"
+  },
+  "plugins/causal-impact-campaign/references/code_templates.md": {
+    "mtime": 1783508108.5863032,
+    "ast_hash": "686fd947fc4025bb52196522123d9908",
+    "semantic_hash": "686fd947fc4025bb52196522123d9908"
+  },
+  "plugins/causal-impact-campaign/references/environment_gotchas.md": {
+    "mtime": 1783508108.5867217,
+    "ast_hash": "01a132d6b1532e9e08f2dc5778cd1d99",
+    "semantic_hash": "01a132d6b1532e9e08f2dc5778cd1d99"
+  },
+  "plugins/causal-impact-campaign/references/eval_research_notes.md": {
+    "mtime": 1783508108.587111,
+    "ast_hash": "dd58beed85c7a0819d94a984493f45bc",
+    "semantic_hash": "dd58beed85c7a0819d94a984493f45bc"
+  },
+  "plugins/causal-impact-campaign/references/extension_analyses.md": {
+    "mtime": 1783508108.5873892,
+    "ast_hash": "52552d050b7347b755a87823349c3ba3",
+    "semantic_hash": "52552d050b7347b755a87823349c3ba3"
+  },
+  "plugins/causal-impact-campaign/references/bibliography.md": {
+    "mtime": 1783508108.5857959,
+    "ast_hash": "12fe243c6c9dca52cbcc4e5dcd7cb5ea",
+    "semantic_hash": "12fe243c6c9dca52cbcc4e5dcd7cb5ea"
+  },
+  "docs/demo-interactive.png": {
+    "mtime": 1783508108.5803976,
+    "ast_hash": "c7fdcc524d771589b9933164126a6883",
+    "semantic_hash": "c7fdcc524d771589b9933164126a6883"
+  },
+  "docs/demo-output.png": {
+    "mtime": 1783508108.5819318,
+    "ast_hash": "2295b75cec3c8ed6e99f64e7dc9e5a37",
+    "semantic_hash": "2295b75cec3c8ed6e99f64e7dc9e5a37"
+  }
+}
